@@ -26,6 +26,8 @@ async def lifespan(app: FastAPI):
         journal.start()
     from .channels import telegram
     await telegram.start()  # no-op unless the phone channel is set up
+    from . import warmup
+    warmup.schedule()  # load the chat model, Whisper and Kokoro in the background
     yield
     await telegram.stop()
 

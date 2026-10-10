@@ -96,6 +96,7 @@ export interface ConfirmRequest {
   tool: string;
   arguments: any;
   risk: string;
+  always_ask?: boolean;  // e.g. send_email: asked every time, never "always allow"
 }
 
 function Bubble({ content }: { content: string }) {
@@ -223,7 +224,7 @@ export function ConfirmModal(props: {
         </div>
         <pre>{request.tool}({JSON.stringify(request.arguments, null, 2)})</pre>
         <div className="actions">
-          {request.risk !== "dangerous" && (
+          {request.risk !== "dangerous" && !request.always_ask && (
             <label className="remember">
               <input type="checkbox" checked={remember}
                      onChange={(e) => setRemember(e.target.checked)} />

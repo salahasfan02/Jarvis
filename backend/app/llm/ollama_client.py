@@ -7,6 +7,7 @@ message without restarting anything.
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from typing import Any, AsyncIterator
 
 import httpx
@@ -164,11 +165,37 @@ async def loaded_models() -> list[dict]:
         return []
 
 
+_embed_cache: "OrderedDict[tuple[str, str], list[float]]" = OrderedDict()
+
+
 async def embed(text: str) -> list[float] | None:
-    """Embed text with the configured embedding model, or None if unset."""
+    """Embed text with the configured embedding model, or None if unset.
+    Cached: memory recall and agent routing embed the same message."""
     model = settings.get("ollama.embedding_model", "")
     if not model:
         return None
+    key = (model, text)
+    if key in _embed_cache:
+        _embed_cache.move_to_end(key)
+        return _embed_cache[key]
+    vector = await _embed_uncached(model, text)
+    if vector:
+        _embed_cache[key] = vector
+        while len(_embed_cache) > 512:
+            _embed_cache.popitem(last=False)
+    return vector
+
+
+async def preload(model: str) -> None:
+    """Load a model into memory now (an empty request does that), so the first
+    real message doesn't wait several seconds for it to load from disk."""
+    async with httpx.AsyncClient(timeout=300) as client:
+        r = await client.post(f"{_host()}/api/generate", json={
+            "model": model, "keep_alive": settings.get("ollama.keep_alive", "30m")})
+        r.raise_for_status()
+
+
+async def _embed_uncached(model: str, text: str) -> list[float] | None:
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(f"{_host()}/api/embed",

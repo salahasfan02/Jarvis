@@ -426,6 +426,11 @@ export function SettingsPage(props: {
             <input type="text" value={s.assistant.name}
                    onChange={(e) => props.onPatch({ assistant: { name: e.target.value } })} />
           </Row>
+          <Row label="Instant commands"
+               sub="Simple commands like “open YouTube”, “open Safari”, “play lofi on YouTube” or “pause” run immediately without the AI model — well under a second instead of several.">
+            <Toggle checked={s.assistant.instant_commands ?? true}
+                    onChange={(v) => props.onPatch({ assistant: { instant_commands: v } })} />
+          </Row>
           <Row label="Wake words" sub="Comma-separated">
             <input type="text" value={s.assistant.wake_words.join(", ")}
                    onChange={(e) => props.onPatch({
@@ -569,7 +574,7 @@ export function SettingsPage(props: {
           </Row>
           {tools.map((t) => (
             <Row key={t.name} label={t.name} sub={t.description.slice(0, 90)}>
-              {t.risk === "dangerous" ? (
+              {t.risk === "dangerous" || t.always_ask ? (
                 <span className="sub" style={{ color: "var(--danger)" }}>always asks</span>
               ) : (
                 <select

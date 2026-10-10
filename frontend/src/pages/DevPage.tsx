@@ -39,7 +39,8 @@ export function DevPage() {
               <div className="audit-row" key={i}>
                 {new Date(e.ts * 1000).toLocaleTimeString()} <b>{e.event}</b>{" "}
                 {e.tool && <b>{e.tool}</b>}{" "}
-                {JSON.stringify({ ...e, ts: undefined, event: undefined, tool: undefined })}
+                {e.event === "chat_timing" ? timingSummary(e)
+                  : JSON.stringify({ ...e, ts: undefined, event: undefined, tool: undefined })}
               </div>
             ))}
             {audit.length === 0 && <div className="sub">No activity yet.</div>}
@@ -98,4 +99,18 @@ export function DevPage() {
       </div>
     </div>
   );
+}
+
+/** "⏱ 3.2 s · first word 2.4 s · read 4,712 tokens (11.8 s) · …" — prompt
+ *  tokens are the ones Ollama had to process; a small number = cache hit. */
+function timingSummary(e: any): string {
+  const sec = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+  const parts = [`⏱ ${sec(e.total_ms ?? 0)} total`, `agent ${e.agent}`];
+  if (e.first_token_ms) parts.push(`first word ${sec(e.first_token_ms)}`);
+  (e.rounds ?? []).forEach((r: any, i: number) => {
+    parts.push(`model call ${i + 1}: read ${r.prompt_tokens.toLocaleString()} tokens ` +
+      `(${sec(r.prompt_ms)}), wrote ${r.gen_tokens} (${sec(r.gen_ms)})` +
+      (r.load_ms > 500 ? `, loaded model ${sec(r.load_ms)}` : ""));
+  });
+  return parts.join(" · ");
 }

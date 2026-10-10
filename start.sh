@@ -8,7 +8,9 @@ cd "$(dirname "$0")"
 # --- 1. Ollama -----------------------------------------------------------
 if ! curl -s http://localhost:11434/api/version >/dev/null 2>&1; then
   echo "▸ Starting Ollama…"
-  ollama serve >/dev/null 2>&1 &
+  # Flash attention makes reading long prompts (tool schemas) faster on Apple
+  # Silicon; Ollama ignores it for models that don't support it.
+  OLLAMA_FLASH_ATTENTION=1 ollama serve >/dev/null 2>&1 &
   OLLAMA_PID=$!
   sleep 2
 else

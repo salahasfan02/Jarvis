@@ -3,6 +3,7 @@ deletion is always confirmed and only moves items to the Trash (never a
 permanent delete)."""
 from __future__ import annotations
 
+import datetime
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,20 +15,42 @@ def _expand(path: str) -> Path:
     return Path(path).expanduser().resolve()
 
 
+def _mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _stamp(p: Path) -> str:
+    return datetime.datetime.fromtimestamp(_mtime(p)).strftime("%Y-%m-%d %H:%M")
+
+
 @tool(
     name="list_directory",
-    description="List files and folders in a directory. Path supports ~ for home.",
+    description="List files and folders in a directory. Path supports ~ for home. "
+                "sort='recent' lists newest first with modification times — use it for "
+                "'my latest/last/newest …' (e.g. the latest screenshot on the Desktop).",
     parameters={
         "type": "object",
-        "properties": {"path": {"type": "string", "description": "directory path, e.g. ~/Desktop"}},
+        "properties": {
+            "path": {"type": "string", "description": "directory path, e.g. ~/Desktop"},
+            "sort": {"type": "string", "enum": ["name", "recent"],
+                     "description": "name (default) or recent (newest first, with dates)"},
+        },
         "required": ["path"],
     },
     agent_tags=["files"],
 )
-def list_directory(path: str) -> str:
+def list_directory(path: str, sort: str = "name") -> str:
     p = _expand(path)
     if not p.is_dir():
         return f"Not a directory: {p}"
+    if sort == "recent":
+        entries = sorted(p.iterdir(), key=_mtime, reverse=True)
+        lines = [f"{_stamp(e)}  {'[dir] ' if e.is_dir() else ''}{e.name}"
+                 for e in entries[:100]]
+        return f"{p} ({len(entries)} items, newest first):\n" + "\n".join(lines)
     entries = sorted(p.iterdir(), key=lambda e: (e.is_file(), e.name.lower()))
     lines = [f"{'[dir] ' if e.is_dir() else ''}{e.name}" for e in entries[:200]]
     return f"{p} ({len(entries)} items):\n" + "\n".join(lines)
@@ -132,7 +155,8 @@ def trash_file(path: str) -> str:
 
 @tool(
     name="search_files",
-    description="Search for files by name using Spotlight (mdfind).",
+    description="Search for files by name using Spotlight (mdfind). Results are newest "
+                "first, each with its modification time and full path.",
     parameters={
         "type": "object",
         "properties": {
@@ -148,5 +172,9 @@ def search_files(query: str, directory: str = "") -> str:
     if directory:
         cmd += ["-onlyin", str(_expand(directory))]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-    lines = result.stdout.strip().splitlines()[:30]
-    return "\n".join(lines) if lines else "No files found."
+    # Newest first, with dates: "the latest screenshot" is then simply line 1,
+    # and full paths let a later turn send the file without searching again.
+    paths = sorted((Path(line) for line in result.stdout.splitlines()[:300] if line),
+                   key=_mtime, reverse=True)[:30]
+    return ("\n".join(f"{_stamp(f)}  {f}" for f in paths) if paths
+            else "No files found.")

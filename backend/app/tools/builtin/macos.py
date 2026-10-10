@@ -1,12 +1,15 @@
 """macOS automation via AppleScript / system commands.
 
 Anything that changes state on the machine or could expose personal data is
-risk-gated: the UI shows a confirmation dialog before it runs. Messages and
-email tools only DRAFT — they open the compose window; the user presses send.
+risk-gated: the UI shows a confirmation dialog before it runs. iMessage is
+draft-only (the user presses send). Email can be drafted, or — when the user
+explicitly says send — sent after they approve that exact message.
 """
 from __future__ import annotations
 
+import re
 import subprocess
+from pathlib import Path
 
 from ..base import tool
 
@@ -337,31 +340,116 @@ def draft_imessage(recipient: str, body: str) -> str:
     return f"Opened Messages with a draft to {recipient}. The user must press send."
 
 
+_EMAIL = re.compile(r"[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+")
+
+
+def _addresses(field: str) -> list[str]:
+    return [a.strip() for a in re.split(r"[,;]", field or "") if a.strip()]
+
+
+def _mail_script(to: list[str], subject: str, body: str, cc: list[str],
+                 attachments: list[Path], send: bool) -> str:
+    """One AppleScript for Mail: build the message, then send it or save it
+    as a draft (Drafts sync to the user's iPhone through their mail account)."""
+    recipients = "\n".join(
+        f'make new {kind} recipient at end of {kind} recipients with properties '
+        f'{{address:"{_q(addr)}"}}'
+        for kind, addrs in (("to", to), ("cc", cc)) for addr in addrs)
+    files = "\n".join(
+        f'make new attachment with properties {{file name:(POSIX file "{_q(str(f))}") '
+        f'as alias}} at after the last paragraph' for f in attachments)
+    attach_block = f"tell content\n{files}\nend tell" if files else ""
+    finish = ("delay 1\nsend newMessage" if send else  # delay: let attachments load
+              "try\nsave newMessage\nend try\nactivate")  # draft stays open for review
+    return f"""
+    tell application "Mail"
+        set newMessage to make new outgoing message with properties {{subject:"{_q(subject)}", content:"{_q(body)}" & return & return, visible:{'false' if send else 'true'}}}
+        tell newMessage
+            {recipients}
+            {attach_block}
+        end tell
+        {finish}
+    end tell
+    return "ok\""""
+
+
+def _email_parts(to: str, cc: str, attachments: list[str] | None
+                 ) -> tuple[list[str], list[str], list[Path], str]:
+    """Validate recipients and attachment paths. Returns (to, cc, files, error)."""
+    to_list, cc_list = _addresses(to), _addresses(cc)
+    if not to_list:
+        return [], [], [], "No recipient given."
+    bad = [a for a in to_list + cc_list if not _EMAIL.fullmatch(a)]
+    if bad:
+        return [], [], [], (f"Not an email address: {', '.join(bad)}. Find the address "
+                            "(e.g. search the user's contacts or ask them) and try again.")
+    files = [Path(a).expanduser() for a in attachments or []]
+    missing = [str(f) for f in files if not f.is_file()]
+    if missing:
+        return [], [], [], f"Attachment not found: {', '.join(missing)}."
+    return to_list, cc_list, files, ""
+
+
+_EMAIL_PARAMS = {
+    "type": "object",
+    "properties": {
+        "to": {"type": "string", "description": "email address(es), comma-separated"},
+        "subject": {"type": "string"},
+        "body": {"type": "string", "description": "plain-text body, signed with the "
+                                                  "user's name (no placeholders)"},
+        "cc": {"type": "string", "description": "optional, comma-separated"},
+        "attachments": {"type": "array", "items": {"type": "string"},
+                        "description": "optional file paths to attach"},
+    },
+    "required": ["to", "subject", "body"],
+}
+
+
 @tool(
     name="draft_email",
-    description="Open Apple Mail with a drafted email. The DRAFT is prepared but the user "
-                "must press send themselves — this tool never sends.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "to": {"type": "string"},
-            "subject": {"type": "string"},
-            "body": {"type": "string"},
-        },
-        "required": ["to", "subject", "body"],
-    },
-    risk="confirm",
+    description="DRAFT an email in Apple Mail without sending it: saves it to Drafts and "
+                "opens it for the user to review. Use when the user says draft, write, "
+                "prepare or compose an email. If they say SEND, use send_email instead.",
+    parameters=_EMAIL_PARAMS,
     agent_tags=["email"],
 )
-def draft_email(to: str, subject: str, body: str) -> str:
-    script = f'''
-    tell application "Mail"
-        set newMessage to make new outgoing message with properties {{subject:"{_q(subject)}", content:"{_q(body)}", visible:true}}
-        tell newMessage to make new to recipient at end of to recipients with properties {{address:"{_q(to)}"}}
-        activate
-    end tell
-    '''
-    return _osascript(script)
+def draft_email(to: str, subject: str, body: str, cc: str = "",
+                attachments: list[str] | None = None) -> str:
+    # Drafts may name a contact ("Mom"): Mail resolves names in the open window.
+    files = [Path(a).expanduser() for a in attachments or []]
+    missing = [str(f) for f in files if not f.is_file()]
+    if missing:
+        return f"Attachment not found: {', '.join(missing)}."
+    out = _osascript(_mail_script(_addresses(to) or [to], subject, body,
+                                  _addresses(cc), files, send=False))
+    if out != "ok":
+        return out
+    return (f"Drafted an email to {to} (subject: {subject}). It's saved in Mail's Drafts "
+            "and open on the Mac — nothing was sent.")
+
+
+@tool(
+    name="send_email",
+    description="SEND an email right away from the user's Apple Mail account. Use ONLY "
+                "when the user explicitly asks to send (\"send an email to…\", \"email "
+                "Sam that…\"); for draft/write/prepare use draft_email. Needs real email "
+                "addresses. The user approves the exact message before it goes out.",
+    parameters=_EMAIL_PARAMS,
+    risk="confirm",
+    always_ask=True,       # irreversible: approved every time, never auto-allowed
+    agent_tags=["email"],
+)
+def send_email(to: str, subject: str, body: str, cc: str = "",
+               attachments: list[str] | None = None) -> str:
+    to_list, cc_list, files, error = _email_parts(to, cc, attachments)
+    if error:
+        return f"Not sent. {error}"
+    out = _osascript(_mail_script(to_list, subject, body, cc_list, files, send=True),
+                     timeout=60)
+    if out != "ok":
+        return f"Not sent — Mail reported: {out}"
+    extra = f" with {len(files)} attachment(s)" if files else ""
+    return f"Sent the email to {', '.join(to_list)}{extra} (subject: {subject})."
 
 
 @tool(

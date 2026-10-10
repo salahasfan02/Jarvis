@@ -90,9 +90,11 @@ register(Agent(
 
 register(Agent(
     id="messaging", name="Messaging & Email Agent",
-    description="Drafting or managing messages and emails.",
-    prompt="You are in messaging mode. Draft clear, well-toned messages. You can only "
-           "prepare drafts — the user always sends them personally.",
+    description="Drafting, sending or managing messages and emails.",
+    prompt="You are in messaging mode. Write clear, well-toned messages. For email: if "
+           "the user says SEND, call send_email (they approve the exact message first); "
+           "if they say draft, write or prepare, call draft_email. Never send when they "
+           "only asked for a draft. iMessages can only be drafted — the user presses send.",
     tool_tags=["messaging", "email"]))
 
 register(Agent(

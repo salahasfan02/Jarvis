@@ -41,6 +41,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "assistant": {
         "name": "Jarvis",
         "wake_words": ["jarvis", "computer", "assistant"],
+        "instant_commands": True,       # "open youtube", "pause": run directly, no model
         "persona": (
             "You are {name}, a capable personal AI assistant running locally on "
             "the user's Mac. Be concise, direct and helpful. Use tools when they "

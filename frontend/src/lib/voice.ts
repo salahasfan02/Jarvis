@@ -249,7 +249,7 @@ export class WhisperVoiceEngine {
     this.mode = "ptt";
     const gen = ++this.generation;
     this.opts.onStateChange("listening");
-    const blob = await this.recordClip({ maxMs: 25000, silenceMs: 1600,
+    const blob = await this.recordClip({ maxMs: 25000, silenceMs: 1200,
                                          waitForSpeechMs: 6000 });
     if (gen !== this.generation) return;
     this.opts.onInterim("…");
@@ -284,7 +284,7 @@ export class WhisperVoiceEngine {
       let command = heard.split(wake.toLowerCase()).slice(1).join(" ")
         .replace(/^[\s,.!?]+/, "").trim();
       if (command.split(/\s+/).filter(Boolean).length < 2) {
-        const cmdClip = await this.recordClip({ maxMs: 20000, silenceMs: 1600,
+        const cmdClip = await this.recordClip({ maxMs: 20000, silenceMs: 1200,
                                                 waitForSpeechMs: 7000 });
         if (gen !== this.generation) return;
         this.opts.onInterim("…");

@@ -51,6 +51,9 @@ async def put_settings(body: SettingsPatch):
     if "enabled" in (body.patch.get("telegram") or {}):
         from ..channels import telegram
         await telegram.start()  # starts or stops the bot to match
+    from .. import warmup
+    if warmup.affected_by(body.patch):
+        warmup.schedule()  # e.g. a new model: load it now, not on the next message
     return updated
 
 
@@ -240,7 +243,7 @@ def remove_memory(mem_id: str):
 @router.get("/tools")
 def list_tools():
     return [{"name": t.name, "description": t.description, "risk": t.risk,
-             "tags": t.agent_tags,
+             "tags": t.agent_tags, "always_ask": t.always_ask,
              "permission": settings.get(f"permissions.{t.name}", "default")}
             for t in tools.registry.all()]
 
@@ -769,7 +772,7 @@ async def ws_chat(ws: WebSocket):
                 confirmations.resolve(msg.get("id", ""), bool(msg.get("approved")))
                 if msg.get("remember") and msg.get("approved") and msg.get("tool"):
                     t = tools.registry.get(msg["tool"])
-                    if t and t.risk == "confirm":  # dangerous can't be remembered
+                    if t and t.risk == "confirm" and not t.always_ask:  # never remembered
                         settings.update({"permissions": {msg["tool"]: "always"}})
 
             elif mtype == "stop":
