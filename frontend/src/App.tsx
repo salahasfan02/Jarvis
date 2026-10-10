@@ -642,6 +642,7 @@ export default function App() {
             wakeWord={(settings?.assistant?.wake_words ?? ["jarvis"])[0]}
             wakeActive={voiceState === "waiting-wake"}
             voiceSupported={voice !== null && settings?.voice?.enabled !== false}
+            voiceEngine={useWhisper ? "whisper" : "browser"}
             onToggleWake={toggleWake}
             onPushToTalk={() =>
               voiceState === "listening" ? voice?.stop() : voice?.startListening()}

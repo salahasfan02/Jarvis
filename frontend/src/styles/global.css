@@ -689,3 +689,11 @@ body {
   display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.15s;
 }
 .bg-thumb:hover .bg-thumb-x { opacity: 1; }
+
+/* ---- voice check (Settings → Voice) ---- */
+.voice-check { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.level-bar { width: 220px; height: 6px; border-radius: 3px; background: var(--bg-3); overflow: hidden; }
+.level-bar > div { height: 100%; background: var(--accent); transition: width 0.08s linear; }
+.heard-list { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; padding: 2px 0 8px; }
+.heard-dot { width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; }
+.heard-dot::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); }
