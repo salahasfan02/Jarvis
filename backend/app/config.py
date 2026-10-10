@@ -41,6 +41,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "assistant": {
         "name": "Jarvis",
         "wake_words": ["jarvis", "computer", "assistant"],
+        "instant_commands": True,       # "open youtube", "pause": run directly, no model
         "persona": (
             "You are {name}, a capable personal AI assistant running locally on "
             "the user's Mac. Be concise, direct and helpful. Use tools when they "
@@ -97,7 +98,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "theme": "hacker",              # hacker | dark | light | cyberpunk | system
         "glass": True,
         "accent": "",                   # hex color overriding the theme accent
-        "background": "",               # "" theme default | "matrix" | "world" | hex
+        "background": "",               # "" theme default | "matrix" | "world" | hex | "image:<name>"
+        "background_dim": 0.45,         # darkening over a picture background (0-0.9)
         "core_design": "orb",           # orb | reactor | halo | nebula
     },
     "developer": {

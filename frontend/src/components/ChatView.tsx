@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Ban, Check, Circle, ExternalLink, Play, TriangleAlert, Wrench, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -52,10 +53,10 @@ function PreBlock(props: any) {
             navigator.clipboard.writeText(code);
             setCopied(true);
             setTimeout(() => setCopied(false), 1200);
-          }}>{copied ? "✓" : "copy"}</button>
+          }}>{copied ? <><Check /> copied</> : "copy"}</button>
           {runnable && (
             <button onClick={run} disabled={running}>
-              {running ? "running…" : "▶ run"}
+              {running ? "running…" : <><Play /> run</>}
             </button>
           )}
         </div>
@@ -63,17 +64,18 @@ function PreBlock(props: any) {
       <pre {...props} />
       {result && (
         <div className={`run-output ${result.error || result.exit_code ? "failed" : "passed"}`}>
-          <div className="run-head">
-            {result.error ? `⚠ ${result.error}`
-              : result.preview_url ? "✓ built"
-              : result.exit_code === 0 ? `✓ ran in ${result.seconds ?? "?"}s (sandboxed)`
-              : `✗ exit code ${result.exit_code}`}
+          <div className="run-head inline-icon">
+            {result.error ? <><TriangleAlert className="icon-bad" /> {result.error}</>
+              : result.preview_url ? <><Check className="icon-ok" /> built</>
+              : result.exit_code === 0
+                ? <><Check className="icon-ok" /> ran in {result.seconds ?? "?"}s (sandboxed)</>
+              : <><X className="icon-bad" /> exit code {result.exit_code}</>}
           </div>
           {result.preview_url && (
             <div style={{ padding: "8px 14px" }}>
               <a href={result.preview_url} target="_blank" rel="noreferrer"
-                 style={{ color: "var(--accent)" }}>
-                ↗ open live preview
+                 className="inline-icon" style={{ color: "var(--accent)" }}>
+                <ExternalLink /> open live preview
               </a>
             </div>
           )}
@@ -96,6 +98,7 @@ export interface ConfirmRequest {
   tool: string;
   arguments: any;
   risk: string;
+  always_ask?: boolean;  // e.g. send_email: asked every time, never "always allow"
 }
 
 function Bubble({ content }: { content: string }) {
@@ -162,7 +165,7 @@ export function ChatView(props: {
         {props.messages.map((m, i) => (
           <div key={m.id} className={`msg ${m.role}`}>
             {m.meta?.tools?.map((t, j) => (
-              <span key={j} className="chip">🛠 {t.name}</span>
+              <span key={j} className="chip"><Wrench className="icon-sm" /> {t.name}</span>
             ))}
             <Bubble content={m.content} />
             <div className="msg-meta msg-actions">
@@ -185,8 +188,9 @@ export function ChatView(props: {
               <span key={i} className={`chip ${c.status === "denied" ? "denied" : ""}`}
                     style={c.status === "pending" ? { opacity: 0.45 } : undefined}>
                 {c.status === "running" ? <span className="spinner" />
-                  : c.status === "denied" ? "⛔"
-                  : c.status === "pending" ? "•" : "✓"}
+                  : c.status === "denied" ? <Ban className="icon-sm" />
+                  : c.status === "pending" ? <Circle className="icon-sm" />
+                  : <Check className="icon-sm icon-ok" />}
                 {c.name}
               </span>
             ))}
@@ -223,7 +227,7 @@ export function ConfirmModal(props: {
         </div>
         <pre>{request.tool}({JSON.stringify(request.arguments, null, 2)})</pre>
         <div className="actions">
-          {request.risk !== "dangerous" && (
+          {request.risk !== "dangerous" && !request.always_ask && (
             <label className="remember">
               <input type="checkbox" checked={remember}
                      onChange={(e) => setRemember(e.target.checked)} />

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Ear, Mic, Music, TriangleAlert } from "lucide-react";
 import { statsApi, SystemStats } from "../lib/api";
 import { voiceBus } from "../lib/voice";
 import { Core, CoreDesign, CoreMode } from "../components/Core";
@@ -116,7 +117,7 @@ export function DashboardPage(props: {
             <button type="button"
                     className={`icon-btn ${props.voiceState === "listening" ? "recording" : ""}`}
                     title="Push to talk" onClick={props.onPushToTalk}>
-              🎤
+              <Mic />
             </button>
           )}
           <input
@@ -136,7 +137,7 @@ export function DashboardPage(props: {
             <button type="button"
                     className={`icon-btn ${props.wakeActive ? "wake-on" : ""}`}
                     title={`Wake word ("${props.wakeWord}")`} onClick={props.onToggleWake}>
-              👂
+              <Ear />
             </button>
           )}
         </form>
@@ -145,7 +146,7 @@ export function DashboardPage(props: {
           {props.voiceState === "waiting-wake" && !props.interim &&
             `Say "${props.wakeWord}" — I'm listening`}
           {props.voiceState === "idle" && props.voiceSupported && !props.wakeActive &&
-            "Wake word off — press 👂 to enable"}
+            <span className="inline-icon">Wake word off — press <Ear className="icon-sm" /> to enable</span>}
         </div>
       </div>
 
@@ -190,12 +191,12 @@ export function DashboardPage(props: {
           <h4>Context</h4>
           {ctx?.enabled ? (
             <>
-              {ctx.degraded && <div className="hud-dim">⚠ {ctx.degraded}</div>}
+              {ctx.degraded && <div className="hud-dim"><TriangleAlert className="icon-sm" /> {ctx.degraded}</div>}
               <div className="hud-row">App: {ctx.frontmost_app || "—"}</div>
               <div className="hud-row">Browser: {ctx.browser} · {ctx.tabs?.length ?? 0} tabs</div>
               {ctx.music?.running && ctx.music.track && (
                 <div className="hud-row">
-                  ♪ {ctx.music.state}: {ctx.music.track} — {ctx.music.artist}
+                  <Music className="icon-sm" /> {ctx.music.state}: {ctx.music.track} — {ctx.music.artist}
                 </div>
               )}
               {(ctx.tabs ?? []).slice(0, 4).map((t: any) => (

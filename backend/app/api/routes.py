@@ -51,6 +51,9 @@ async def put_settings(body: SettingsPatch):
     if "enabled" in (body.patch.get("telegram") or {}):
         from ..channels import telegram
         await telegram.start()  # starts or stops the bot to match
+    from .. import warmup
+    if warmup.affected_by(body.patch):
+        warmup.schedule()  # e.g. a new model: load it now, not on the next message
     return updated
 
 
@@ -240,7 +243,7 @@ def remove_memory(mem_id: str):
 @router.get("/tools")
 def list_tools():
     return [{"name": t.name, "description": t.description, "risk": t.risk,
-             "tags": t.agent_tags,
+             "tags": t.agent_tags, "always_ask": t.always_ask,
              "permission": settings.get(f"permissions.{t.name}", "default")}
             for t in tools.registry.all()]
 
@@ -334,7 +337,10 @@ async def system_stats():
              "gpu_percent": round(100 * m.get("size_vram", 0) / m["size"]) if m.get("size") else 0}
             for m in loaded],
         "running_tools": list(running_now.keys()),
-        "recent_activity": audit.tail(8),
+        # The Core's "Tool activity" panel: tool runs and approvals only, not
+        # settings changes or warm-ups.
+        "recent_activity": [e for e in audit.tail(80)
+                            if e.get("event", "").startswith(("tool_", "confirmation_"))][:8],
     }
 
 
@@ -467,6 +473,40 @@ def skills_import(body: dict):
         added.append(slug)
     audit.log("skills_imported", added=len(added), skipped=len(skipped))
     return {"added": added, "skipped": skipped}
+
+
+# --- background pictures ---------------------------------------------------------
+
+@router.get("/backgrounds")
+def backgrounds_list():
+    from .. import backgrounds
+    return backgrounds.list_all()
+
+
+@router.post("/backgrounds")
+async def backgrounds_upload(request: Request, name: str = "picture.jpg"):
+    from .. import backgrounds
+    result = backgrounds.save(name, await request.body())
+    if "error" not in result:
+        audit.log("background_added", name=result["name"])
+    return result
+
+
+@router.get("/backgrounds/file/{name}")
+def backgrounds_file(name: str):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    from .. import backgrounds
+    path = backgrounds.path_for(name)
+    if path is None:
+        raise HTTPException(status_code=404)
+    return FileResponse(path, headers={"Cache-Control": "max-age=31536000, immutable"})
+
+
+@router.delete("/backgrounds/{name}")
+def backgrounds_delete(name: str):
+    from .. import backgrounds
+    return backgrounds.delete(name)
 
 
 # --- phone channel (Telegram) ---------------------------------------------------
@@ -638,12 +678,12 @@ async def stt_download(body: dict | None = None):
 
 
 @router.post("/stt/transcribe")
-async def stt_transcribe(request: Request):
+async def stt_transcribe(request: Request, hint: str = ""):
     from ..speech import stt
     audio = await request.body()
     if not audio:
         return {"error": "empty audio"}
-    return await stt.transcribe(audio)
+    return await stt.transcribe(audio, hint=hint[:200])
 
 
 # --- code studio ---------------------------------------------------------------
@@ -769,7 +809,7 @@ async def ws_chat(ws: WebSocket):
                 confirmations.resolve(msg.get("id", ""), bool(msg.get("approved")))
                 if msg.get("remember") and msg.get("approved") and msg.get("tool"):
                     t = tools.registry.get(msg["tool"])
-                    if t and t.risk == "confirm":  # dangerous can't be remembered
+                    if t and t.risk == "confirm" and not t.always_ask:  # never remembered
                         settings.update({"permissions": {msg["tool"]: "always"}})
 
             elif mtype == "stop":

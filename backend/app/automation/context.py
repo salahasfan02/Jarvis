@@ -36,14 +36,23 @@ def frontmost_app() -> str:
         'process whose frontmost is true')
 
 
+def app_running(name: str) -> bool:
+    """Is an app running? pgrep takes milliseconds; asking System Events via
+    AppleScript takes a few hundred, and this runs on every browser action."""
+    try:
+        return subprocess.run(["pgrep", "-xq", name], timeout=3).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return _osascript(f'tell application "System Events" to (name of processes) '
+                          f'contains "{name}"') == "true"
+
+
 def browser_name() -> str:
     """The browser to automate: the configured one, else whichever is running."""
     configured = settings.get("automation.browser", "")
     if configured:
         return configured
     for name in ("Safari", "Google Chrome"):
-        if _osascript(f'tell application "System Events" to (name of processes) '
-                      f'contains "{name}"') == "true":
+        if app_running(name):
             return name
     return "Safari"
 
@@ -84,10 +93,9 @@ def list_tabs(browser: str | None = None) -> list[dict]:
 
 
 def music_state() -> dict:
+    if not app_running("Music"):  # never launch Music just to ask about it
+        return {"running": False}
     script = '''
-    tell application "System Events"
-        if (name of processes) does not contain "Music" then return ""
-    end tell
     tell application "Music"
         if player state is playing then
             return "playing\\t" & (name of current track) & "\\t" & (artist of current track)

@@ -400,7 +400,7 @@ def test_voice_notes_are_transcribed_and_answered_by_voice(env, monkeypatch):
 
     run(main())
     assert "🎙 “what's on my calendar”" in fake.texts()
-    assert llm.rounds[0]["messages"][-1]["content"] == "what's on my calendar"
+    assert llm.rounds[0]["messages"][-1]["content"].endswith("\n\nwhat's on my calendar")
     voice = (fake.sent("sendVoice") or fake.sent("sendAudio"))[0]["_files"]
     name, data = next(iter(voice.values()))
     assert data[:4] in (b"OggS", b"RIFF")
@@ -429,6 +429,20 @@ def test_a_spoken_yes_approves_the_open_question(env, monkeypatch, tmp_path):
 
     run(main())
     assert fake.sent("sendDocument")[0]["_files"]["document"][0] == "notes.txt"
+
+
+def test_an_empty_model_reply_is_retried_not_reported_as_done(env):
+    fake, make_bot, script = env
+    script(answer(""), answer(""))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("send me the latest screenshot"))
+        await until(lambda: any("Sorry" in t for t in fake.texts()))
+        await bot.stop()
+
+    run(main())
+    assert "✅ Done." not in fake.texts()
 
 
 # --- polling --------------------------------------------------------------------------

@@ -90,8 +90,25 @@ async def download(size: str):
         _downloading = None
 
 
-async def transcribe(audio: bytes) -> dict:
-    """Transcribe an audio blob (webm/ogg/wav/m4a — PyAV decodes them all)."""
+def _bias_kwargs(model, hint: str) -> dict:
+    """Nudge Whisper towards words it should expect — above all the wake word,
+    which it otherwise often writes as "Jervis", "Javis" or "Gervais".
+    `hotwords` (faster-whisper >= 1.0.2) biases without the hallucination risk
+    of a prompt; older versions get the same hint as an initial prompt."""
+    if not hint:
+        return {}
+    import inspect
+    try:
+        if "hotwords" in inspect.signature(model.transcribe).parameters:
+            return {"hotwords": hint}
+    except (TypeError, ValueError):
+        pass
+    return {"initial_prompt": hint}
+
+
+async def transcribe(audio: bytes, hint: str = "") -> dict:
+    """Transcribe an audio blob (webm/ogg/wav/m4a — PyAV decodes them all).
+    `hint`: words to expect, e.g. the wake words."""
     size = configured_size()
     if not model_present(size):
         return {"error": f"whisper model '{size}' is not downloaded"}
@@ -106,6 +123,7 @@ async def transcribe(audio: bytes) -> dict:
             beam_size=1,
             vad_filter=True,
             condition_on_previous_text=False,
+            **_bias_kwargs(model, hint),
         )
         text = " ".join(seg.text.strip() for seg in segments).strip()
         return {"text": text, "language": info.language,

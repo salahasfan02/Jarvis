@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ArrowUp, Check, Code, Play, Square, Sparkles, TriangleAlert, Wand2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import { API } from "../lib/api";
@@ -85,11 +86,11 @@ export function CodePage({ seed, onSeedConsumed }: {
             setOutput(acc);
             scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
           }
-          if (ev.error) acc += `\n\n⚠️ ${ev.error}`;
+          if (ev.error) acc += `\n\n**Error:** ${ev.error}`;
         }
       }
     } catch (e: any) {
-      if (e.name !== "AbortError") acc += `\n\n⚠️ ${e.message}`;
+      if (e.name !== "AbortError") acc += `\n\n**Error:** ${e.message}`;
     }
     setHistory((h) => [...h, { role: "assistant", content: acc }]);
     setOutput("");
@@ -142,10 +143,10 @@ export function CodePage({ seed, onSeedConsumed }: {
         body: JSON.stringify({ name, code }),
       });
       const r = await res.json();
-      setInstallMsg(r.error ? `❌ ${r.error}`
-        : `✓ installed — new tools: ${r.new_tools?.join(", ") || "none"}`);
+      setInstallMsg(r.error ? `Install failed: ${r.error}`
+        : `Installed — new tools: ${r.new_tools?.join(", ") || "none"}`);
     } catch (e: any) {
-      setInstallMsg(`❌ ${e.message}`);
+      setInstallMsg(`Install failed: ${e.message}`);
     }
   };
 
@@ -162,7 +163,7 @@ export function CodePage({ seed, onSeedConsumed }: {
   return (
     <div className="code-page">
       <div className="code-toolbar">
-        <span className="code-title">⌨️ Code Studio</span>
+        <span className="code-title inline-icon"><Code /> Code Studio</span>
         <select value={language} onChange={(e) => setLanguage(e.target.value)}>
           {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
         </select>
@@ -171,13 +172,13 @@ export function CodePage({ seed, onSeedConsumed }: {
           <>
             {runnable && (
               <button className="btn primary" disabled={running || busy} onClick={runCode}>
-                {running ? "Running…" : "▶ Run"}
+                {running ? "Running…" : <><Play /> Run</>}
               </button>
             )}
             {code.includes("@tool(") && (
-              <button className="btn" onClick={installSkill}>⚡ Install as skill</button>
+              <button className="btn" onClick={installSkill}><Sparkles /> Install as skill</button>
             )}
-            <button className="btn" onClick={copyCode}>{copied ? "✓ Copied" : "Copy code"}</button>
+            <button className="btn" onClick={copyCode}>{copied ? <><Check /> Copied</> : "Copy code"}</button>
             <button className="btn" onClick={download}>Download</button>
             <button className="btn" onClick={() => { setHistory([]); setOutput(""); setRunResult(null); setInstallMsg(""); }}>
               New session
@@ -190,7 +191,7 @@ export function CodePage({ seed, onSeedConsumed }: {
       <div className="code-output" ref={scrollRef}>
         {history.length === 0 && !output ? (
           <div className="code-empty">
-            <div style={{ fontSize: 42 }}>⌨️</div>
+            <Code className="empty-icon" />
             <h2>What should I build?</h2>
             <div className="sub">
               Describe a program, script, component or function.<br />
@@ -217,13 +218,14 @@ export function CodePage({ seed, onSeedConsumed }: {
             {runResult && (
               <div className={`run-output ${runResult.error || runResult.exit_code ? "failed" : "passed"}`}>
                 <div className="run-head">
-                  <span>
-                    {runResult.error ? `⚠ ${runResult.error}`
-                      : runResult.exit_code === 0 ? "✓ ran successfully (sandboxed)"
-                      : `✗ exited with code ${runResult.exit_code}`}
+                  <span className="inline-icon">
+                    {runResult.error ? <><TriangleAlert className="icon-bad" /> {runResult.error}</>
+                      : runResult.exit_code === 0
+                        ? <><Check className="icon-ok" /> ran successfully (sandboxed)</>
+                      : <><X className="icon-bad" /> exited with code {runResult.exit_code}</>}
                   </span>
                   {(runResult.error || runResult.exit_code !== 0) && (
-                    <button className="btn" onClick={autoFix}>🔧 Auto-fix</button>
+                    <button className="btn" onClick={autoFix}><Wand2 /> Auto-fix</button>
                   )}
                 </div>
                 {runResult.stdout && <pre>{runResult.stdout}</pre>}
@@ -249,10 +251,10 @@ export function CodePage({ seed, onSeedConsumed }: {
           }}
         />
         {busy ? (
-          <button className="icon-btn" title="Stop" onClick={() => abortRef.current?.abort()}>■</button>
+          <button className="icon-btn" title="Stop" onClick={() => abortRef.current?.abort()}><Square /></button>
         ) : (
           <button className="icon-btn primary" title="Generate" disabled={!prompt.trim()}
-                  onClick={generate}>↑</button>
+                  onClick={generate}><ArrowUp /></button>
         )}
       </div>
     </div>

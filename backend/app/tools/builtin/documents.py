@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import difflib
 import re
 import shutil
 import subprocess
@@ -224,6 +225,46 @@ def create_word_document(title: str, content: str, filename: str = "") -> str:
             "If the user wants it on their phone, call send_file with this path.")
 
 
+def _name_key(name: str) -> str:
+    """Compare file names the way a person would. macOS writes screenshot times
+    as 23.55.30 with a narrow no-break space before AM/PM; models write 23:55:30
+    with plain spaces, often without the extension."""
+    return re.sub(r"[\s\u202f\u00a0]+", " ", name.lower().replace(":", ".")).strip()
+
+
+def _mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def resolve_path(path: str) -> tuple[Path | None, list[str]]:
+    """The file the model meant, or (None, close-name suggestions)."""
+    p = Path(path).expanduser()
+    if p.exists():
+        return p.resolve(), []
+    folders = [p.parent] if str(p.parent) not in ("", ".") else [
+        Path.home() / d for d in ("Desktop", "Downloads", "Documents")]
+    want = _name_key(p.name)
+    candidates: list[Path] = []
+    for folder in folders:
+        try:
+            candidates += list(folder.iterdir())
+        except OSError:
+            continue
+    hits = [c for c in candidates if want in (_name_key(c.name), _name_key(c.stem))]
+    if len(hits) == 1:
+        return hits[0].resolve(), []
+    # Suggestions: names containing the guess (newest first), then near-misses.
+    stem = _name_key(p.stem)
+    containing = sorted((c for c in candidates if len(stem) >= 4 and stem in _name_key(c.name)),
+                        key=_mtime, reverse=True)
+    names = {_name_key(c.name): c.name for c in candidates}
+    close = [names[k] for k in difflib.get_close_matches(want, list(names), n=5, cutoff=0.6)]
+    return None, list(dict.fromkeys([c.name for c in containing] + close))[:5]
+
+
 def _folder_size(folder: Path, limit: int) -> int:
     """Total size of a folder, stopping early once it passes `limit`."""
     total = 0
@@ -252,9 +293,11 @@ def _folder_size(folder: Path, limit: int) -> int:
     agent_tags=["remote"],   # offered on phone turns (and to the all-tools planner)
 )
 async def send_file(path: str, caption: str = "") -> str:
-    p = Path(path).expanduser().resolve()
-    if not p.exists():
-        return f"No file or folder at {p}. Find the exact path with search_files first."
+    p, suggestions = await asyncio.to_thread(resolve_path, path)
+    if p is None:
+        hint = f" Similar names there: {', '.join(suggestions)}." if suggestions else ""
+        return (f"No file or folder at {Path(path).expanduser()}.{hint} Find the exact "
+                "path with search_files or list_directory, then call send_file again.")
     channel = channels.current.get()
     if channel is None:
         # Chatting at the Mac: there is no phone to send to, so show it instead.

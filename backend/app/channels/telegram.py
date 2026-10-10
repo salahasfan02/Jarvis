@@ -64,6 +64,12 @@ TOOL_LABELS = {
     "send_file": "📤 Sending the file",
     "screen_read": "👁 Reading the screen",
     "screen_look": "👁 Looking at the screen",
+    "youtube_play": "▶️ Starting it on YouTube",
+    "browser_open": "🌐 Opening it in the browser",
+    "open_app": "🚀 Opening the app",
+    "draft_email": "✉️ Drafting the email",
+    "send_email": "📨 Sending the email",
+    "music_play": "🎵 Starting the music",
 }
 
 _YES = {"yes", "y", "yeah", "yep", "yup", "ok", "okay", "sure", "allow", "approve",

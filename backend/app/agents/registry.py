@@ -90,9 +90,11 @@ register(Agent(
 
 register(Agent(
     id="messaging", name="Messaging & Email Agent",
-    description="Drafting or managing messages and emails.",
-    prompt="You are in messaging mode. Draft clear, well-toned messages. You can only "
-           "prepare drafts — the user always sends them personally.",
+    description="Drafting, sending or managing messages and emails.",
+    prompt="You are in messaging mode. Write clear, well-toned messages. For email: if "
+           "the user says SEND, call send_email (they approve the exact message first); "
+           "if they say draft, write or prepare, call draft_email. Never send when they "
+           "only asked for a draft. iMessages can only be drafted — the user presses send.",
     tool_tags=["messaging", "email"]))
 
 register(Agent(
@@ -194,7 +196,10 @@ _ROUTE_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-_PLANNER_HINTS = ["plan ", "plan:", "step by step", "multi-step", "organize my day",
+# Phrases that ask for several actions in sequence. A message merely
+# MENTIONING a plan ("draft an email about the plan") is not one — "plan"
+# only counts at the start ("plan my week", handled in route()).
+_PLANNER_HINTS = ["step by step", "multi-step", "organize my day",
                   "organize my week", "morning routine", "and then", "after that",
                   "set everything up", "prepare my"]
 

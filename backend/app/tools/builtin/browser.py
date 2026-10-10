@@ -59,13 +59,16 @@ def _find_tab(site_hint: str) -> tuple[str, int] | None:
     return None
 
 
-def _focus_tab(browser: str, index: int) -> None:
+def _focus_script(browser: str, index: int) -> str:
     if "Chrome" in browser:
-        _osascript(f'tell application "{browser}" to set active tab index of front window to {index}')
+        select = f"set active tab index of front window to {index}"
     else:
-        _osascript(f'tell application "{browser}" to set current tab of front window '
-                   f'to tab {index} of front window')
-    _osascript(f'tell application "{browser}" to activate')
+        select = f"set current tab of front window to tab {index} of front window"
+    return f'tell application "{browser}"\n{select}\nactivate\nend tell'
+
+
+def _focus_tab(browser: str, index: int) -> None:
+    _osascript(_focus_script(browser, index))  # one osascript launch, not two
 
 
 @tool(
@@ -117,27 +120,26 @@ def browser_open(url: str, new_window: bool = False) -> str:
         _osascript(f'tell application "{browser}" to activate')
         return f"Opened {url} in a NEW {browser} window." if ok else f"Failed: {err}"
 
-    found = _find_tab(domain)
-    if found:
-        b, idx = found
-        if "Chrome" in b:
-            _osascript(f'tell application "{b}" to set URL of tab {idx} of front window to "{_q(url)}"')
-        else:
-            _osascript(f'tell application "{b}" to set URL of tab {idx} of front window to "{_q(url)}"')
-        _focus_tab(b, idx)
-        return f"Reused the existing {domain} tab (tab {idx}) and navigated to {url}."
-
-    tabs_before = context.list_tabs(browser)
-    if not tabs_before:
+    # Each osascript launch costs ~0.1-0.3 s, so: one tab listing (skipped when
+    # the browser isn't even running), then one script per outcome.
+    tabs = context.list_tabs(browser) if context.app_running(browser) else []
+    if not tabs:
         subprocess.run(["open", "-a", browser, url], timeout=10)
         return f"Opened {url} in {browser}."
-    if "Chrome" in browser:
-        ok, err = _osascript(f'tell application "{browser}" to make new tab at end of tabs '
-                             f'of front window with properties {{URL:"{_q(url)}"}}')
-    else:
-        ok, err = _osascript(f'tell application "{browser}" to make new tab at end of tabs '
-                             f'of front window with properties {{URL:"{_q(url)}"}}')
-    _osascript(f'tell application "{browser}" to activate')
+    match = next((t for t in tabs if domain and domain in t["url"].lower()), None)
+    if match:
+        idx = match["index"]
+        if urllib.parse.urlparse(url).path in ("", "/"):
+            # "open youtube" with YouTube already open: just bring that tab
+            # forward — don't reload it and stop whatever is playing.
+            _osascript(_focus_script(browser, idx))
+            return f"Switched to the existing {domain} tab (tab {idx})."
+        _osascript(f'tell application "{browser}" to set URL of tab {idx} of front window '
+                   f'to "{_q(url)}"\n' + _focus_script(browser, idx))
+        return f"Reused the existing {domain} tab (tab {idx}) and navigated to {url}."
+    ok, err = _osascript(f'tell application "{browser}"\n'
+                         f'make new tab at end of tabs of front window with properties '
+                         f'{{URL:"{_q(url)}"}}\nactivate\nend tell')
     return f"Opened {url} in a new tab of the existing window." if ok else f"Failed: {err}"
 
 

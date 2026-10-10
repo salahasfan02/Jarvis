@@ -8,7 +8,9 @@ tool calling) and a risk level that drives the permission system:
   dangerous -> always requires confirmation; "always allow" is not offered
 
 User overrides in settings.permissions can relax "confirm" to "always" or
-block a tool entirely with "never". Dangerous tools can never be relaxed.
+block a tool entirely with "never". Dangerous tools can never be relaxed, and
+neither can a confirm tool marked always_ask (e.g. send_email: irreversible,
+but fine to use from the phone — dangerous tools are blocked there).
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ class Tool:
     handler: Callable[..., Awaitable[str] | str]
     risk: str = "safe"                       # safe | confirm | dangerous
     agent_tags: list[str] = field(default_factory=list)
+    always_ask: bool = False                 # confirm every time; can't be set to "always"
 
     def to_ollama(self) -> dict:
         return {
@@ -43,7 +46,7 @@ class Tool:
     def needs_confirmation(self) -> bool:
         if self.risk == "safe":
             return False
-        if self.risk == "dangerous":
+        if self.risk == "dangerous" or self.always_ask:
             return True
         override = settings.get(f"permissions.{self.name}")
         return override != "always"
@@ -93,12 +96,13 @@ running_now: dict[str, float] = {}
 
 
 def tool(name: str, description: str, parameters: dict[str, Any],
-         risk: str = "safe", agent_tags: list[str] | None = None):
+         risk: str = "safe", agent_tags: list[str] | None = None,
+         always_ask: bool = False):
     """Decorator used by built-in tools and plugins alike."""
     def wrap(fn):
         registry.register(Tool(name=name, description=description,
                                parameters=parameters, handler=fn, risk=risk,
-                               agent_tags=agent_tags or []))
+                               agent_tags=agent_tags or [], always_ask=always_ask))
         return fn
     return wrap
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Check, Code, Folder, MessageSquare } from "lucide-react";
 import { API } from "../lib/api";
 
 interface Project {
@@ -85,7 +86,7 @@ export function ProjectsPage({ onOpenConversation }: {
               <div className="row" key={p.id} style={{ cursor: "pointer" }}
                    onClick={() => open(p.id)}>
                 <div>
-                  <div className="label">📁 {p.name}</div>
+                  <div className="label inline-icon"><Folder className="icon-sm" /> {p.name}</div>
                   <div className="sub">
                     {p.description || "no description"} · updated{" "}
                     {new Date(p.updated_at * 1000).toLocaleDateString()}
@@ -98,9 +99,9 @@ export function ProjectsPage({ onOpenConversation }: {
         ) : (
           <div className="panel">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ margin: 0 }}>📁 {selected.name}</h3>
+              <h3 className="inline-icon" style={{ margin: 0 }}><Folder /> {selected.name}</h3>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {saved && <span className="sub" style={{ color: "var(--ok)" }}>saved ✓</span>}
+                {saved && <span className="sub inline-icon" style={{ color: "var(--ok)" }}><Check className="icon-sm" /> saved</span>}
                 <button className="btn" onClick={() => setSelected(null)}>‹ All projects</button>
                 <button className="btn danger"
                         onClick={() => {
@@ -144,7 +145,10 @@ export function ProjectsPage({ onOpenConversation }: {
             {(selected.conversations ?? []).map((c) => (
               <div className="row" key={c.id} style={{ cursor: "pointer" }}
                    onClick={() => onOpenConversation(c.id)}>
-                <span className="label">{c.mode === "code" ? "⌨ " : "💬 "}{c.title}</span>
+                <span className="label inline-icon">
+                  {c.mode === "code" ? <Code className="icon-sm" /> : <MessageSquare className="icon-sm" />}
+                  {c.title}
+                </span>
                 <span className="sub">open ›</span>
               </div>
             ))}

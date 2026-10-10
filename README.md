@@ -86,7 +86,7 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Browser agent** — reuses your tabs, never spams windows
 - Play **YouTube** & **Apple Music**, manage playlists
 - **Notes, Reminders, Calendar** — read and create
-- Draft **iMessage & Email** (you press send)
+- **Email** — draft it, or send it when you say *send* (you approve every email first) · draft iMessages
 
 </td>
 <td width="50%" valign="top">
@@ -113,6 +113,7 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Custom Skills** — save prompts, invoke with `/name`, import/export
 - **Self-improving** — logs what it can't do and can write its own tools
 - **Multi-model** — assign models per task, benchmark them
+- **Instant commands** — *"open YouTube"*, *"open Safari"*, *"pause"* run in well under a second, no model needed
 
 </td>
 </tr>
@@ -136,32 +137,24 @@ Two-minute setup — see [Phone setup](#-phone-setup-telegram).
 
 ## 🚀 Quick Start
 
-> ⚠️ **Check your Python first.** macOS ships with Python 3.9, and the backend **cannot install** on it — `onnxruntime` publishes no 3.9 wheel, so `pip` fails with `ResolutionImpossible`. Step 1 below is not optional.
-
 ```bash
-# 1. Python 3.11+  —  macOS's built-in python3 is 3.9 and will not work
-python3 --version                 # 3.11 or newer? skip to step 2
-brew install python@3.12          # otherwise, install a supported one
+# 1. Python 3.11+  —  macOS's built-in python3 is 3.9, which can't run Jarvis
+brew install python@3.12          # skip if `python3 --version` already says 3.11+
 
 # 2. Install Ollama and pull a model (https://ollama.com/download)
 ollama pull qwen2.5:14b
 
-# 3. Clone
+# 3. Clone and run everything with one command
 git clone https://github.com/Salahasfan02/Jarvis.git
 cd Jarvis
-
-# 4. Build the backend environment with an explicit 3.11+ interpreter.
-#    (start.sh calls a bare `python3`, which on a stock Mac is 3.9 — so create
-#    the venv yourself and start.sh will use it as-is.)
-/opt/homebrew/bin/python3.12 -m venv backend/.venv
-
-# 5. Run everything with one command
 chmod +x start.sh && ./start.sh
 ```
 
+`start.sh` finds a Python 3.11+ on its own, installs everything on the first run (and again whenever a `git pull` changes the dependencies), and retries an install that was interrupted.
+
 Your browser opens at **http://localhost:5173** and Jarvis is live. Press **Ctrl+C** (or `./stop.sh`) to turn it off. Nothing auto-starts; it only runs when you start it.
 
-> 🔧 **First launch — set your model.** The dashboard will say `llama3.1`, which is the built-in default in `backend/app/config.py` and is *not* the model you pulled above. Open **Settings → Model** and select `qwen2.5:14b`, or your first message will fail against a model you don't have. (Alternatively, `ollama pull llama3.1` and skip the switch.)
+> 🔧 **Your model is picked for you.** If the configured model (`llama3.1` by default) isn't installed, Jarvis switches to one you have — `qwen2.5:14b` above. Change it anytime in **Settings → Model**.
 
 > 🔐 **macOS will ask for permissions.** The first time Jarvis reads your screen, uses the camera, or drives another app, macOS prompts for **Screen Recording**, **Camera**, **Microphone**, and **Accessibility**. Grant them in System Settings → Privacy & Security. Screen OCR and app automation silently return nothing until you do.
 
@@ -227,22 +220,22 @@ Things to know:
 ## 🔧 Troubleshooting
 
 <details>
-<summary><b><code>ResolutionImpossible</code> / "no matching distributions available for onnxruntime"</b></summary>
+<summary><b>"backend/.venv uses Python 3.9" / <code>ResolutionImpossible</code> for onnxruntime</b></summary>
 
-You built the environment with Python 3.9 (macOS's default). Delete it and rebuild with 3.11+:
+An environment from an older setup was built with macOS's Python 3.9. Install a newer Python, delete the `backend/.venv` folder, and start again — `start.sh` rebuilds it with 3.11+:
 
 ```bash
-rm -rf backend/.venv
 brew install python@3.12
-/opt/homebrew/bin/python3.12 -m venv backend/.venv
-./start.sh
+rm -rf backend/.venv && ./start.sh
 ```
 </details>
 
 <details>
-<summary><b><code>ModuleNotFoundError: No module named 'fastapi'</code> (or similar) on every run</b></summary>
+<summary><b>"Jarvis" doesn't react to the wake word</b></summary>
 
-You have a **half-built venv**. If the dependency install fails partway, the empty `backend/.venv` directory is left behind — and because `start.sh` only installs when that directory is *missing*, every later run skips the install and launches against an empty environment. The fix is the same as above: `rm -rf backend/.venv`, then recreate it with a 3.11+ interpreter.
+- In a browser, click anywhere on the Jarvis page once after it opens — browsers keep audio off until you do (the Core says *"Click anywhere so I can hear you"*). The desktop app doesn't need this.
+- Download the **Whisper** model in **Settings → Voice** (offline, and far more reliable than the browser's recognizer).
+- Grant **Microphone** access to your browser / Jarvis.app in System Settings → Privacy & Security.
 </details>
 
 <details>
@@ -255,6 +248,15 @@ The active model doesn't exist locally. Run `ollama list` to see what you actual
 <summary><b>The desktop app opens a blank window</b></summary>
 
 In dev mode it loads `http://localhost:5173`, so the Vite dev server has to be running — start the stack with `./start.sh` before `npm start`.
+</details>
+
+<details>
+<summary><b>Replies feel slow</b></summary>
+
+Simple commands (*"open YouTube"*, *"pause"*) skip the model entirely. For everything else, the local model is the cost:
+- **Settings → Task models → Utility:** pick a small model (e.g. `ollama pull qwen2.5:1.5b`). Titles and background work then stop competing with your conversation.
+- **Settings → Keep model in memory:** `-1` keeps the model loaded, so replies never wait for it to load (uses RAM while Jarvis runs).
+- **Developer → Audit** shows a timing line per message: how many tokens the model had to read and how long that took. After the first message in a conversation, that number should drop to a few hundred — that's the prompt cache working.
 </details>
 
 <details>
@@ -293,15 +295,16 @@ Jarvis is built to earn your trust:
 - **Runs 100% locally** — the only network calls are the web-search tools *you* invoke, plus Telegram if you turn on the phone channel.
 - **Permission system** — every action has a risk level. Safe actions run instantly; anything that touches your system (shell, AppleScript, deleting files) asks first, every time.
 - **Audit log** — every tool call, confirmation, and denial is recorded.
-- **You always press send** — messages and emails are only ever *drafted*.
-- **Sandboxed code** — generated code runs with no network and confined file access.
+- **Nothing is sent behind your back** — iMessages are only drafted; an email goes out only when you say *send* and approve that exact message (this approval can't be switched off).
+- **Websites can't drive it** — the local API only accepts changes and chat connections from Jarvis's own UI, so a page you visit can't talk to Jarvis behind your back.
+- **Sandboxed code** — generated code runs with no network, can't read your keys, mail or messages, can't script other apps, and can only write to its own folder.
 
 ---
 
 ## 🏗️ Tech Stack
 
 **Backend:** FastAPI · Ollama · SQLite · faster-whisper (STT) · Kokoro (TTS) · Apple Vision (OCR) · pyobjc
-**Frontend:** React · TypeScript · Vite
+**Frontend:** React · TypeScript · Vite · [Lucide](https://lucide.dev) icons (ISC)
 **Desktop:** Electron (tray, global hotkeys, floating window)
 
 Modular by design — new tools, agents, models, and integrations drop in without touching the core. See [`docs/architecture.md`](docs/architecture.md).
@@ -312,7 +315,6 @@ Modular by design — new tools, agents, models, and integrations drop in withou
 
 - [ ] Encrypted memory & conversation storage
 - [ ] First-run setup wizard (auto-pulls the right models)
-- [ ] Version check + explicit interpreter selection in `start.sh`
 - [ ] Self-contained `.app` (bundled backend)
 - [ ] Meeting transcription with speaker separation
 - [ ] Git integration in the coding workspace

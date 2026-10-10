@@ -1,9 +1,12 @@
 """Terminal, screen and camera tools."""
 from __future__ import annotations
 
+import ast
 import asyncio
 import base64
 import datetime
+import math
+import operator
 import subprocess
 import tempfile
 from pathlib import Path
@@ -50,14 +53,55 @@ def current_datetime() -> str:
     },
 )
 def calculator(expression: str) -> str:
-    import math
-    allowed = {name: getattr(math, name) for name in dir(math) if not name.startswith("_")}
-    allowed.update({"abs": abs, "round": round, "min": min, "max": max, "sum": sum})
     try:
-        result = eval(compile(expression, "<calc>", "eval"), {"__builtins__": {}}, allowed)
-        return str(result)
-    except Exception as e:
+        return str(safe_eval(expression))
+    except (ValueError, TypeError, ZeroDivisionError, OverflowError, SyntaxError) as e:
         return f"Could not evaluate: {e}"
+
+
+_BIN_OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+            ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv,
+            ast.Mod: operator.mod, ast.Pow: operator.pow}
+_UNARY_OPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+_FUNCS = {n: f for n in dir(math) if not n.startswith("_") and callable(f := getattr(math, n))}
+_FUNCS.update(abs=abs, round=round, min=min, max=max, sum=sum)
+_CONSTS = {"pi": math.pi, "e": math.e, "tau": math.tau, "inf": math.inf}
+_HEAVY = {"factorial", "comb", "perm"}  # cheap to ask for, can take hours to compute
+
+
+def safe_eval(expression: str):
+    """Arithmetic only. The old eval() with empty builtins was escapable
+    (().__class__.__base__.__subclasses__() reaches os.popen), and this tool
+    runs without asking — any web page or document the model read could have
+    used it to run shell commands. Now only numbers, operators and math
+    functions are understood; everything else is refused."""
+    def ev(node):
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in _BIN_OPS:
+            left, right = ev(node.left), ev(node.right)
+            if isinstance(node.op, ast.Pow) and abs(right) > 10_000:
+                raise ValueError("exponent too large")
+            return _BIN_OPS[type(node.op)](left, right)
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPS:
+            return _UNARY_OPS[type(node.op)](ev(node.operand))
+        if isinstance(node, ast.Name) and node.id in _CONSTS:
+            return _CONSTS[node.id]
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in _FUNCS and not node.keywords):
+            args = [ev(a) for a in node.args]
+            if node.func.id in _HEAVY and any(abs(a) > 10_000 for a in args):
+                raise ValueError("number too large")
+            return _FUNCS[node.func.id](*args)
+        if isinstance(node, (ast.List, ast.Tuple)):  # sum([1, 2]), max(3, 4)
+            return [ev(e) for e in node.elts]
+        raise ValueError("only numbers, arithmetic and math functions are allowed")
+
+    if len(expression) > 500:
+        raise ValueError("expression too long")
+    return ev(ast.parse(expression, mode="eval"))
 
 
 async def _describe_image(path: Path, question: str) -> str:

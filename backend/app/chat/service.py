@@ -13,8 +13,12 @@ Emits event dicts consumed by the WebSocket layer:
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
+import functools
 import json
+import os
+import time
 from typing import AsyncIterator
 
 from .. import channels, db
@@ -27,6 +31,7 @@ from ..memory import store as memory_store
 from ..security import audit
 from ..security.permissions import confirmations
 from ..tools import base as tools
+from . import quick
 
 SMART_WINDOW_RULES = """Smart context rules (IMPORTANT):
 - Before opening any website, check the open tabs (they are listed above, or
@@ -40,10 +45,30 @@ SMART_WINDOW_RULES = """Smart context rules (IMPORTANT):
 - Continue the user's current activity in place; don't duplicate contexts."""
 
 
+CONTEXT_RULES = """The latest user message may begin with a <context>…</context>
+block. The SYSTEM adds it, not the user: the current time, what the user is
+doing on the Mac, and things you remember about them. Use it silently: never
+quote or list it, never volunteer it unprompted (no announcing the time or
+which apps are open). Mention a detail only when it is directly relevant,
+in your own words — e.g. 'I can see you're in Messages'."""
+
+
+@functools.lru_cache(maxsize=1)
+def _user_full_name() -> str:
+    """The Mac account's full name ("Salah Asfan") — so emails get signed
+    properly instead of with a "[Your Name]" placeholder."""
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0].strip()
+    except (ImportError, KeyError, OSError):
+        return ""
+
+
 def _static_system_prompt(agent: agents.Agent) -> str:
     """The big prompt (persona + rules; the tool schemas follow it in the
-    template). It must contain NOTHING that changes between messages, so
-    Ollama's prefix cache survives and prompt processing is nearly free."""
+    template). It must contain NOTHING that changes between messages: Ollama
+    reuses its work for an unchanged prefix, so the ~2-6k tokens of prompt and
+    tool schemas cost nothing after the first message."""
     name = settings.get("assistant.name", "Jarvis")
     persona = settings.get("assistant.persona", "").format(name=name)
     parts = [persona]
@@ -53,16 +78,16 @@ def _static_system_prompt(agent: agents.Agent) -> str:
     parts.append(
         "When a tool would help, call it instead of guessing. Some tool calls "
         "require the user's confirmation; if one is denied, respect that and "
-        "explain what you would have done. A second system note carries the "
-        "current time and what the user is doing — use it silently; never "
-        "recite it.")
+        "explain what you would have done.")
+    parts.append(CONTEXT_RULES)
+    if user := _user_full_name():
+        parts.append(f"The user's name is {user}. Sign emails and messages you write "
+                     f"for them as {user}; never leave placeholders like [Your Name].")
     return "\n\n".join(parts)
 
 
 def _dynamic_block(memories: list[dict], ctx: dict) -> str:
-    """Small, changing facts — kept OUT of the big static prompt so the cache
-    prefix survives. Placed at the top of the conversation and explicitly
-    marked internal so the model never echoes it back to the user."""
+    """Small, changing facts for THIS message only (see CONTEXT_RULES)."""
     parts = ["Current date/time: "
              + datetime.datetime.now().strftime("%A, %B %d %Y, %H:%M")]
     ctx_summary = app_context.summary_for_prompt(ctx)
@@ -76,17 +101,28 @@ def _dynamic_block(memories: list[dict], ctx: dict) -> str:
         parts.append(
             f"The user is messaging you from their PHONE via {channel.name}, away "
             "from this Mac. Keep replies short and phone-friendly. When they ask "
-            "for a file from this Mac, find it (search_files / list_directory) and "
-            "deliver it with send_file. When they ask for a document or report, "
-            "write it with create_word_document, then send_file the path it returns.")
-    parts.append(
-        "This block is INTERNAL background awareness. Never quote, list, or "
-        "repeat it, and never volunteer these details unprompted (no announcing "
-        "the time or what apps are open). Mention a detail only when it is "
-        "directly relevant, phrased naturally in your own words — e.g. 'I can "
-        "see you're in Messages' or 'your music is paused — want me to resume "
-        "it?'.")
+            "for a file from this Mac, find it (search_files / list_directory — "
+            "results are newest first, with dates) and deliver it with send_file; "
+            "for 'the latest/newest/last' one, just send the most recent match "
+            "instead of asking which. When they ask for a document or report, write "
+            "it with create_word_document, then send_file the path it returns.")
     return "\n\n".join(parts)
+
+
+def _with_context(messages: list[dict], dyn: str) -> list[dict]:
+    """Prepend the dynamic block to the LAST user message.
+
+    Ollama's chat templates gather every system message into one block that
+    sits before the tool schemas, so a changing system note (the clock ticks
+    every minute) forced the model to re-read thousands of tokens of tool
+    schemas on every message. In the user turn it leaves the system prompt,
+    tools and history byte-identical, so only the new message is processed."""
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i]["role"] == "user":
+            messages[i] = {**messages[i], "content":
+                           f"<context>\n{dyn}\n</context>\n\n{messages[i]['content']}"}
+            break
+    return messages
 
 
 def _tools_for(agent: agents.Agent) -> list[tools.Tool]:
@@ -98,34 +134,106 @@ def _tools_for(agent: agents.Agent) -> list[tools.Tool]:
     return tools.registry.for_agent(tags)
 
 
+REPLAY_RESULT_CHARS = 800   # per tool result carried into later turns
+REPLAY_MAX_CALLS = 4
+
+
 def _history_to_llm(history: list[dict]) -> list[dict]:
-    msgs = []
+    """Stored turns -> model messages, INCLUDING what earlier tools returned.
+    Without it a follow-up like "send number 1" fails: the paths a search found
+    one message ago were gone, leaving only the model's own paraphrase. Every
+    turn is replayed the same way each time, so the prefix stays cacheable."""
+    msgs: list[dict] = []
     for m in history:
-        if m["role"] in ("user", "assistant"):
-            msgs.append({"role": m["role"], "content": m["content"]})
+        if m["role"] == "user":
+            msgs.append({"role": "user", "content": m["content"]})
+        elif m["role"] == "assistant":
+            calls = [c for c in (m.get("meta") or {}).get("tools") or []
+                     if c.get("name")][:REPLAY_MAX_CALLS]
+            if calls:
+                msgs.append({"role": "assistant", "content": "", "tool_calls": [
+                    {"function": {"name": c["name"], "arguments": c.get("arguments") or {}}}
+                    for c in calls]})
+                msgs.extend({"role": "tool", "tool_name": c["name"],
+                             "content": (c.get("result") or "")[:REPLAY_RESULT_CHARS]}
+                            for c in calls)
+            msgs.append({"role": "assistant", "content": m["content"]})
     return msgs
 
 
+def _short_title(text: str) -> str:
+    """Short first messages ("open youtube") are already a fine title — no need
+    to spend a model call (which also evicts Ollama's cached prompt)."""
+    words = text.split()
+    if not words or len(words) > 6 or len(text) > 60:
+        return ""
+    title = " ".join(words).rstrip(".!?")
+    return title[:1].upper() + title[1:]
+
+
+def _sticky_agent(history: list[dict], user_content: str) -> agents.Agent | None:
+    """A short reply to a question Jarvis just asked ("the first one", "yes,
+    the PDF") continues with the same agent instead of being re-routed by
+    keywords — "1. Screenshot …" used to land on the vision agent."""
+    prev = next((m for m in reversed(history[:-1]) if m["role"] == "assistant"), None)
+    if not prev or not prev["content"].rstrip().endswith("?"):
+        return None
+    if len(user_content.split()) > 12:
+        return None
+    agent = agents.AGENTS.get((prev.get("meta") or {}).get("agent", ""))
+    return agent if agent and agent.id not in ("planner",) else None
+
+
+def _round_timing(chunk: dict) -> dict:
+    """Ollama's own counters from the final chunk. prompt_tokens counts only
+    tokens it actually had to process — a small number means the cache hit."""
+    ms = 1e6
+    return {"prompt_tokens": chunk.get("prompt_eval_count", 0),
+            "prompt_ms": round(chunk.get("prompt_eval_duration", 0) / ms),
+            "gen_tokens": chunk.get("eval_count", 0),
+            "gen_ms": round(chunk.get("eval_duration", 0) / ms),
+            "load_ms": round(chunk.get("load_duration", 0) / ms)}
+
+
+EMPTY_NUDGE = ("(Your last reply was empty. Either call the tool that does what I "
+               "asked, or answer me in words.)")
+EMPTY_FALLBACK = ("Sorry — I didn't manage to do that. Could you say it another way?")
+
+
 async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dict]:
+    started = time.perf_counter()
     db.add_message(conversation_id, "user", user_content)
     history = db.get_messages(conversation_id)
+    conv = db.get_conversation(conversation_id) or {}
 
-    memories = []
-    try:
-        memories = await memory_store.recall(user_content)
-    except Exception:
-        pass
+    # Instant commands ("open youtube", "pause") skip the model entirely.
+    if conv.get("mode") != "code" and quick.enabled():
+        action = await asyncio.to_thread(quick.match, user_content)
+        if action is not None:
+            async for event in _run_quick(conversation_id, user_content, action,
+                                          history, started):
+                yield event
+            return
+
+    # Memory recall and routing both need the message embedding; run them
+    # together (the embedding itself is cached, so it's computed once).
+    async def recall() -> list[dict]:
+        try:
+            return await memory_store.recall(user_content)
+        except Exception:
+            return []
+
+    async def pick_agent() -> agents.Agent:
+        if conv.get("mode") == "code":  # unified workspace: code mode = coding agent
+            return agents.AGENTS["coding"]
+        return _sticky_agent(history, user_content) or await agents.route(user_content)
+
+    memories, agent = await asyncio.gather(recall(), pick_agent())
     if memories:
         yield {"type": "memory",
                "recalled": [{"id": m["id"], "content": m["content"]} for m in memories]}
-
-    # Code-mode conversations always use the coding agent (unified workspace).
-    conv = db.get_conversation(conversation_id) or {}
-    if conv.get("mode") == "code":
-        agent = agents.AGENTS["coding"]
-    else:
-        agent = await agents.route(user_content)
     yield {"type": "agent", "agent": {"id": agent.id, "name": agent.name}}
+    routed_ms = round((time.perf_counter() - started) * 1000)
 
     try:
         ctx = await app_context.snapshot_nowait()
@@ -137,18 +245,12 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
             yield event
         return
 
-    history_msgs = _history_to_llm(history)
-    dyn = _dynamic_block(memories, ctx)
-    # Dynamic context sits at the TOP (its natural system position — models
-    # echo mid-conversation system messages) while the huge static prompt +
-    # tool schemas before it stay byte-identical for Ollama's prefix cache.
     llm_messages: list[dict] = [
         {"role": "system", "content": _static_system_prompt(agent)},
-        {"role": "system", "content": dyn},
-        *history_msgs,
+        *_with_context(_history_to_llm(history), _dynamic_block(memories, ctx)),
     ]
     # Uploaded files ride along for the whole conversation (stable between
-    # uploads, so it sits before the changing dynamic block for cacheability).
+    # uploads, so the cached prefix survives).
     try:
         from ..knowledge import attachments as attach
         attach_block = attach.prompt_block(conversation_id)
@@ -182,9 +284,13 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
     full_response = ""
     tool_events: list[dict] = []
     max_rounds = settings.get("tools.max_iterations", 6)
+    rounds: list[dict] = []
+    first_token_ms = None
+    nudged = False
 
     try:
-        for round_no in range(max_rounds + 1):
+        round_no = 0
+        while round_no <= max_rounds:
             # Last round: no tools, force the model to answer with what it has.
             schemas = tool_schemas if round_no < max_rounds else None
             round_text = ""
@@ -195,16 +301,26 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                     tools=schemas):
                 msg = chunk.get("message", {})
                 if msg.get("content"):
+                    if first_token_ms is None:
+                        first_token_ms = round((time.perf_counter() - started) * 1000)
                     round_text += msg["content"]
                     full_response += msg["content"]
                     yield {"type": "token", "content": msg["content"]}
                 for tc in msg.get("tool_calls") or []:
                     tool_calls.append(tc)
                 if chunk.get("done"):
+                    rounds.append(_round_timing(chunk))
                     break
 
             if not tool_calls:
-                break
+                if full_response.strip() or nudged:
+                    break
+                # Local models occasionally return nothing at all (no words, no
+                # tool call). Ask once more instead of silently giving up.
+                nudged = True
+                llm_messages.append({"role": "assistant", "content": round_text})
+                llm_messages.append({"role": "user", "content": EMPTY_NUDGE})
+                continue
 
             llm_messages.append({"role": "assistant", "content": round_text,
                                  "tool_calls": tool_calls})
@@ -224,6 +340,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                     yield event
                 llm_messages.append({"role": "tool", "content": out["output"],
                                      "tool_name": name})
+            round_no += 1
     except ollama_client.OllamaError as e:
         yield {"type": "error", "message": str(e)}
         return
@@ -232,18 +349,35 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
         yield {"type": "error", "message": f"Unexpected error: {e}"}
         return
 
+    if not full_response.strip():
+        full_response = EMPTY_FALLBACK
+        yield {"type": "token", "content": full_response}
+
+    timing = {"total_ms": round((time.perf_counter() - started) * 1000),
+              "route_ms": routed_ms, "first_token_ms": first_token_ms,
+              "rounds": rounds}
+    audit.log("chat_timing", agent=agent.id, **timing)
     saved = db.add_message(conversation_id, "assistant", full_response,
                            meta={"agent": agent.id, "tools": tool_events})
-    yield {"type": "done", "content": full_response, "message_id": saved["id"]}
+    yield {"type": "done", "content": full_response, "message_id": saved["id"],
+           "timing": timing}
 
     # Self-improvement: analyze this turn for capability gaps (non-blocking).
     gaps.schedule_analysis(user_content, full_response, tool_events)
     # Auto-memory: quietly learn durable facts the user shared (toggleable).
     memory_store.schedule_auto_capture(user_content)
 
-    # Auto-title new conversations from the first exchange.
+    async for event in _auto_title(conversation_id, user_content):
+        yield event
+
+
+async def _auto_title(conversation_id: str, user_content: str) -> AsyncIterator[dict]:
+    """Title new conversations from the first message."""
     conv_msgs = db.get_messages(conversation_id)
-    if len([m for m in conv_msgs if m["role"] == "user"]) == 1:
+    if len([m for m in conv_msgs if m["role"] == "user"]) != 1:
+        return
+    title = _short_title(user_content)
+    if not title:
         try:
             title = await ollama_client.chat_once([
                 {"role": "user",
@@ -252,11 +386,34 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                             + user_content[:500]}],
                 model=ollama_client.model_for("utility"))
             title = title.strip().strip('"')[:60]
-            if title:
-                db.rename_conversation(conversation_id, title=title)
-                yield {"type": "title", "title": title}
         except Exception:
-            pass
+            return
+    if title:
+        db.rename_conversation(conversation_id, title=title)
+        yield {"type": "title", "title": title}
+
+
+async def _run_quick(conversation_id: str, user_content: str, action: quick.QuickAction,
+                     history: list[dict], started: float) -> AsyncIterator[dict]:
+    """Run an instant command: one tool call, a canned reply, no model."""
+    yield {"type": "agent", "agent": {"id": "quick", "name": "Instant command"}}
+    tool_events: list[dict] = []
+    out: dict = {}
+    denied = False
+    async for event in _execute_with_permission(action.tool, action.arguments,
+                                                tool_events, out):
+        denied = denied or bool(event.get("denied"))
+        yield event
+    reply = "Okay, I won't." if denied else quick.reply_for(action, out["output"])
+    yield {"type": "token", "content": reply}
+    timing = {"total_ms": round((time.perf_counter() - started) * 1000),
+              "route_ms": 0, "first_token_ms": None, "rounds": []}
+    audit.log("chat_timing", agent="quick", tool=action.tool, **timing)
+    saved = db.add_message(conversation_id, "assistant", reply,
+                           meta={"agent": "quick", "tools": tool_events})
+    yield {"type": "done", "content": reply, "message_id": saved["id"], "timing": timing}
+    async for event in _auto_title(conversation_id, user_content):
+        yield event
 
 
 PLAN_SCHEMA = {
@@ -306,14 +463,13 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
         # doc"), so hand over real content, not a one-line teaser.
         prior = "\n\n".join(f"Step {i + 1} result:\n{s}"
                             for i, s in enumerate(step_summaries))[-8000:] or "(first step)"
-        step_messages: list[dict] = [
+        step_messages: list[dict] = _with_context([
             {"role": "system", "content": _static_system_prompt(agent)},
-            {"role": "system", "content": _dynamic_block(memories, ctx)},
             {"role": "user", "content":
                 f"OVERALL GOAL: {goal}\n\nPROGRESS SO FAR:\n{prior}\n\n"
                 f"CURRENT STEP ({index + 1}/{len(steps)}): {step}\n"
                 f"Complete only this step now."},
-        ]
+        ], _dynamic_block(memories, ctx))
         schemas = [t.to_ollama() for t in tool_list] or None
         step_text = ""
         # The duplicate-call guard is per step: a later step may legitimately
@@ -414,7 +570,7 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
     elif t.needs_confirmation():
         pc = confirmations.create(name, args, t.risk)
         yield {"type": "confirm_request", "id": pc.id, "tool": name,
-               "arguments": args, "risk": t.risk}
+               "arguments": args, "risk": t.risk, "always_ask": t.always_ask}
         approved = await confirmations.wait(pc.id)
         if approved:
             yield {"type": "tool_start", "name": name, "arguments": args}
@@ -429,5 +585,5 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
 
     yield {"type": "tool_result", "name": name,
            "result": denied_label if denied else output[:1000], "denied": denied}
-    tool_events.append({"name": name, "arguments": args, "result": output[:500]})
+    tool_events.append({"name": name, "arguments": args, "result": output[:2000]})
     out["output"] = output

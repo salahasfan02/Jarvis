@@ -2,8 +2,11 @@
 search uses DuckDuckGo's HTML endpoint."""
 from __future__ import annotations
 
+import asyncio
 import html as html_lib
+import ipaddress
 import re
+import socket
 
 import httpx
 
@@ -57,6 +60,29 @@ async def web_search(query: str, site: str = "") -> str:
     return "\n".join(results) if results else "No results found."
 
 
+class PrivateAddress(httpx.RequestError):
+    pass
+
+
+def _is_public(host: str) -> bool:
+    """True if every address `host` resolves to is on the public internet."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return True  # unresolvable: let the request fail with a normal DNS error
+    return all(ipaddress.ip_address(info[4][0].split("%")[0]).is_global for info in infos)
+
+
+async def _only_public(request: httpx.Request) -> None:
+    """Runs before every request, redirects included. web_fetch reads pages the
+    model chose, often because a page it read told it to — it must not be a
+    way into this Mac (Jarvis's own API on 127.0.0.1 holds memories and
+    settings) or the home network (router admin pages, NAS)."""
+    host = request.url.host
+    if not await asyncio.to_thread(_is_public, host):
+        raise PrivateAddress(f"{host} is a local or private network address", request=request)
+
+
 @tool(
     name="web_fetch",
     description="Fetch a URL and return the readable text content of the page. "
@@ -71,8 +97,12 @@ async def web_search(query: str, site: str = "") -> str:
 async def web_fetch(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    async with httpx.AsyncClient(timeout=20, headers=UA, follow_redirects=True) as client:
-        r = await client.get(url)
+    async with httpx.AsyncClient(timeout=20, headers=UA, follow_redirects=True,
+                                 event_hooks={"request": [_only_public]}) as client:
+        try:
+            r = await client.get(url)
+        except PrivateAddress as e:
+            return f"Refused: {e}. web_fetch only reads public websites."
         r.raise_for_status()
         ctype = r.headers.get("content-type", "")
         if "html" not in ctype and "text" not in ctype and "json" not in ctype:

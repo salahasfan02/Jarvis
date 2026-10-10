@@ -7,7 +7,7 @@ export type ChatEvent =
   | { type: "token"; content: string }
   | { type: "tool_start"; name: string; arguments: any }
   | { type: "tool_result"; name: string; result: string; denied?: boolean }
-  | { type: "confirm_request"; id: string; tool: string; arguments: any; risk: string }
+  | { type: "confirm_request"; id: string; tool: string; arguments: any; risk: string; always_ask?: boolean }
   | { type: "plan"; steps: string[] }
   | { type: "step"; index: number; total: number; title: string; status: "running" | "done" }
   | { type: "done"; content: string; message_id: string }

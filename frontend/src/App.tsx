@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowUp, Code, Ear, FileText, Image as ImageIcon, MessageSquare, Mic, Paperclip, Square, X,
+} from "lucide-react";
 import { ChatView, ConfirmModal, ConfirmRequest, ToolChipInfo } from "./components/ChatView";
 import { MatrixRain } from "./components/MatrixRain";
 import { WorldMap } from "./components/WorldMap";
@@ -137,9 +140,9 @@ export default function App() {
           { method: "POST", body: await file.arrayBuffer(),
             headers: { "Content-Type": "application/octet-stream" } });
         const r = await res.json();
-        setUploading(r.error ? `❌ ${r.error}` : "");
+        setUploading(r.error ? `Couldn't add ${file.name}: ${r.error}` : "");
       } catch (e: any) {
-        setUploading(`❌ ${e.message}`);
+        setUploading(`Couldn't add ${file.name}: ${e.message}`);
       }
     }
     refreshAttachments(convId);
@@ -221,7 +224,8 @@ export default function App() {
           break;
         }
         case "confirm_request":
-          setConfirm({ id: e.id, tool: e.tool, arguments: e.arguments, risk: e.risk });
+          setConfirm({ id: e.id, tool: e.tool, arguments: e.arguments, risk: e.risk,
+                       always_ask: e.always_ask });
           break;
         case "plan":
           setChips(e.steps.map((s, i) => ({
@@ -260,7 +264,7 @@ export default function App() {
           setChips([]);
           setMessages((m) => [
             ...m,
-            { id: `err-${Date.now()}`, role: "assistant", content: `⚠️ ${e.message}`, meta: {}, created_at: Date.now() / 1000 },
+            { id: `err-${Date.now()}`, role: "assistant", content: `**Error:** ${e.message}`, meta: {}, created_at: Date.now() / 1000 },
           ]);
           break;
       }
@@ -285,7 +289,9 @@ export default function App() {
   useEffect(() => {
     const check = () =>
       fetch(`${API}/stt/status`).then((r) => r.json())
-        .then((s) => setSttReady(!!s.available)).catch(() => setSttReady(false));
+        // A failed check (backend busy or restarting) keeps the current engine:
+        // switching engines drops the microphone mid-sentence.
+        .then((s) => setSttReady(!!s.available)).catch(() => {});
     check();
     const t = setInterval(check, 20000);
     return () => clearInterval(t);
@@ -293,11 +299,15 @@ export default function App() {
 
   const useWhisper = (settings?.voice?.stt_engine ?? "whisper") === "whisper" && sttReady;
 
+  // The engine is built once per engine type; it reaches `send` through a ref
+  // so re-renders never tear down the microphone.
+  const sendRef = useRef(send);
+  sendRef.current = send;
   const voice = useMemo(() => {
     const opts = {
       language: "en-US",
-      wakeWords: ["jarvis"],
-      onTranscript: (text: string) => { lastInputWasVoice.current = true; send(text); },
+      wakeWords: settingsRef.current?.assistant?.wake_words ?? ["jarvis"],
+      onTranscript: (text: string) => { lastInputWasVoice.current = true; sendRef.current(text); },
       onInterim: setInterim,
       onWake: () => {
         stopSpeaking();
@@ -309,7 +319,7 @@ export default function App() {
     if (useWhisper) return new WhisperVoiceEngine(opts);
     if (!speechSupported) return null;
     return new VoiceEngine(opts);
-  }, [send, useWhisper]);
+  }, [useWhisper]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // stop the previous engine whenever the engine instance is replaced
   useEffect(() => () => voice?.stop(), [voice]);
@@ -390,7 +400,9 @@ export default function App() {
   }, [settings]);
 
   const bgKind: string = settings?.ui?.background ?? "";
-  const animatedBg = bgKind === "matrix" || bgKind === "world";
+  const bgPicture = bgKind.startsWith("image:")
+    ? `${API}/backgrounds/file/${encodeURIComponent(bgKind.slice(6))}` : "";
+  const animatedBg = bgKind === "matrix" || bgKind === "world" || !!bgPicture;
 
   const patchSettings = (patch: any) => {
     setSettings((s: any) => {
@@ -475,6 +487,11 @@ export default function App() {
     <>
     {bgKind === "matrix" && <MatrixRain />}
     {bgKind === "world" && <WorldMap />}
+    {bgPicture && (
+      <div className="bg-picture" style={{ backgroundImage: `url("${bgPicture}")` }}>
+        <div className="bg-picture-dim" style={{ opacity: settings?.ui?.background_dim ?? 0.45 }} />
+      </div>
+    )}
     <div className={`app ${settings?.ui?.glass !== false ? "glass" : ""} ${animatedBg ? "matrix-bg" : ""}`}>
       <Sidebar
         conversations={conversations}
@@ -500,9 +517,9 @@ export default function App() {
             <div className="workspace-header">
               <div className="mode-toggle">
                 <button className={mode === "chat" ? "active" : ""}
-                        onClick={() => switchMode("chat")}>💬 Chat</button>
+                        onClick={() => switchMode("chat")}><MessageSquare /> Chat</button>
                 <button className={mode === "code" ? "active" : ""}
-                        onClick={() => switchMode("code")}>⌨️ Code</button>
+                        onClick={() => switchMode("code")}><Code /> Code</button>
               </div>
               {mode === "code" && (
                 <span className="workspace-hint">
@@ -516,9 +533,9 @@ export default function App() {
                 value={conversations.find((c) => c.id === activeId)?.project_id ?? ""}
                 onChange={(e) => assignProject(e.target.value)}
               >
-                <option value="">📁 no project</option>
+                <option value="">No project</option>
                 {projects.map((p) => (
-                  <option key={p.id} value={p.id}>📁 {p.name}</option>
+                  <option key={p.id} value={p.id}>Project: {p.name}</option>
                 ))}
               </select>
             </div>
@@ -538,11 +555,11 @@ export default function App() {
               <div className="attach-row">
                 {attachments.map((a) => (
                   <span key={a.id} className="chip">
-                    {a.kind === "image" ? "🖼" : "📄"} {a.name}
+                    {a.kind === "image" ? <ImageIcon /> : <FileText />} {a.name}
                     <button className="chip-x" title="Remove"
                             onClick={() => api.deleteAttachment(a.id)
                               .then(() => refreshAttachments(activeIdRef.current))}>
-                      ✕
+                      <X className="icon-sm" />
                     </button>
                   </span>
                 ))}
@@ -553,7 +570,7 @@ export default function App() {
               <div className="composer">
                 <button className="icon-btn" title="Attach files or images"
                         onClick={() => fileInputRef.current?.click()}>
-                  📎
+                  <Paperclip />
                 </button>
                 <input ref={fileInputRef} type="file" multiple style={{ display: "none" }}
                        onChange={(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
@@ -563,7 +580,7 @@ export default function App() {
                     title="Push to talk"
                     onClick={() => voiceState === "idle" ? voice?.startListening() : voice?.stop()}
                   >
-                    🎤
+                    <Mic />
                   </button>
                 )}
                 {voiceEnabled && (
@@ -572,7 +589,7 @@ export default function App() {
                     title={`Wake word ("${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}")`}
                     onClick={() => voiceState === "waiting-wake" ? voice?.stop() : voice?.startWakeWord()}
                   >
-                    👂
+                    <Ear />
                   </button>
                 )}
                 <textarea
@@ -597,10 +614,10 @@ export default function App() {
                   }}
                 />
                 {busy ? (
-                  <button className="icon-btn" title="Stop" onClick={() => socket.stop()}>■</button>
+                  <button className="icon-btn" title="Stop" onClick={() => socket.stop()}><Square /></button>
                 ) : (
                   <button className="icon-btn primary" title="Send" disabled={!input.trim()}
-                          onClick={() => { lastInputWasVoice.current = false; send(input); }}>↑</button>
+                          onClick={() => { lastInputWasVoice.current = false; send(input); }}><ArrowUp /></button>
                 )}
               </div>
               <div className="voice-hint">
