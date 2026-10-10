@@ -196,7 +196,10 @@ _ROUTE_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-_PLANNER_HINTS = ["plan ", "plan:", "step by step", "multi-step", "organize my day",
+# Phrases that ask for several actions in sequence. A message merely
+# MENTIONING a plan ("draft an email about the plan") is not one — "plan"
+# only counts at the start ("plan my week", handled in route()).
+_PLANNER_HINTS = ["step by step", "multi-step", "organize my day",
                   "organize my week", "morning routine", "and then", "after that",
                   "set everything up", "prepare my"]
 

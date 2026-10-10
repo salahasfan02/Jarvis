@@ -224,7 +224,8 @@ export default function App() {
           break;
         }
         case "confirm_request":
-          setConfirm({ id: e.id, tool: e.tool, arguments: e.arguments, risk: e.risk });
+          setConfirm({ id: e.id, tool: e.tool, arguments: e.arguments, risk: e.risk,
+                       always_ask: e.always_ask });
           break;
         case "plan":
           setChips(e.steps.map((s, i) => ({

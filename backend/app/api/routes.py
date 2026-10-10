@@ -337,7 +337,10 @@ async def system_stats():
              "gpu_percent": round(100 * m.get("size_vram", 0) / m["size"]) if m.get("size") else 0}
             for m in loaded],
         "running_tools": list(running_now.keys()),
-        "recent_activity": audit.tail(8),
+        # The Core's "Tool activity" panel: tool runs and approvals only, not
+        # settings changes or warm-ups.
+        "recent_activity": [e for e in audit.tail(80)
+                            if e.get("event", "").startswith(("tool_", "confirmation_"))][:8],
     }
 
 

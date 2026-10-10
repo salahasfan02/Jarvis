@@ -248,3 +248,10 @@ def test_browser_not_running_skips_tab_scripting(monkeypatch, fake_browser):
 def test_short_first_messages_title_themselves():
     assert service._short_title("open youtube") == "Open youtube"
     assert service._short_title("please write me a long essay about the history of rome") == ""
+
+
+def test_mentioning_a_plan_doesnt_summon_the_planner():
+    from app.agents import registry as agents
+    assert asyncio.run(agents.route("draft an email to sam about the plan")).id == "messaging"
+    assert asyncio.run(agents.route("plan my week")).id == "planner"
+    assert asyncio.run(agents.route("open safari and then play lofi")).id == "planner"
