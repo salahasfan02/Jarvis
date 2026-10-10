@@ -85,8 +85,8 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - Open/close apps, control windows, notifications, clipboard
 - **Browser agent** — reuses your tabs, never spams windows
 - Play **YouTube** & **Apple Music**, manage playlists
-- **Notes, Reminders, Calendar** — read and create
-- **Email** — draft it, or send it when you say *send* (you approve every email first) · draft iMessages
+- **Calendar** — *"what's on my calendar tomorrow?"* (all calendars, repeating events included) · **Notes, Reminders** — read and create
+- **Email** — *"summarize my emails"*, *"any new mail from Sam?"*, reply to one, draft, or send when you say *send* (you approve every email first) · draft iMessages
 
 </td>
 <td width="50%" valign="top">
@@ -156,7 +156,7 @@ Your browser opens at **http://localhost:5173** and Jarvis is live. Press **Ctrl
 
 > 🔧 **Your model is picked for you.** If the configured model (`llama3.1` by default) isn't installed, Jarvis switches to one you have — `qwen2.5:14b` above. Change it anytime in **Settings → Model**.
 
-> 🔐 **macOS will ask for permissions.** The first time Jarvis reads your screen, uses the camera, or drives another app, macOS prompts for **Screen Recording**, **Camera**, **Microphone**, and **Accessibility**. Grant them in System Settings → Privacy & Security. Screen OCR and app automation silently return nothing until you do.
+> 🔐 **macOS will ask for permissions.** The first time Jarvis reads your screen, uses the camera, reads your calendar, or drives another app, macOS prompts for **Screen Recording**, **Camera**, **Microphone**, **Calendars**, **Automation** (Mail, Safari, Music) and **Accessibility**. Grant them in System Settings → Privacy & Security. Email features use the **Mail** app, so add your accounts (iCloud, Gmail, Outlook…) there.
 
 <details>
 <summary><b>Prefer the native desktop app?</b></summary>

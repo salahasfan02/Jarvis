@@ -381,16 +381,16 @@ def test_voice_notes_are_transcribed_and_answered_by_voice(env, monkeypatch):
 
     async def transcribe(audio):
         assert audio == b"OggS-voice"
-        return {"text": "what's on my calendar"}
+        return {"text": "what should I cook tonight"}
 
     async def synthesize(text):
-        assert "meetings" in text and "**" not in text
+        assert "pasta" in text and "**" not in text
         return _wav()
 
     monkeypatch.setattr(stt, "transcribe", transcribe)
     monkeypatch.setattr(engines, "synthesize", synthesize)
     fake.files["V1"] = b"OggS-voice"
-    llm = script(answer("You have **two** meetings today."))
+    llm = script(answer("How about **pasta** tonight?"))
 
     async def main():
         bot = make_bot()
@@ -399,8 +399,8 @@ def test_voice_notes_are_transcribed_and_answered_by_voice(env, monkeypatch):
         await bot.stop()
 
     run(main())
-    assert "🎙 “what's on my calendar”" in fake.texts()
-    assert llm.rounds[0]["messages"][-1]["content"].endswith("\n\nwhat's on my calendar")
+    assert "🎙 “what should I cook tonight”" in fake.texts()
+    assert llm.rounds[0]["messages"][-1]["content"].endswith("\n\nwhat should I cook tonight")
     voice = (fake.sent("sendVoice") or fake.sent("sendAudio"))[0]["_files"]
     name, data = next(iter(voice.values()))
     assert data[:4] in (b"OggS", b"RIFF")

@@ -155,12 +155,34 @@ def match(text: str) -> QuickAction | None:
         query = m.group(1).strip()
         return QuickAction("music_play", {"query": query}, "")
 
+    if action := _calendar(low):
+        return action
+
     if m := _MEDIA_RE.fullmatch(low):
         word, target = m.group(1), m.group(2) or ""
         if word in _NEEDS_TARGET and not target:
             return None
         return media_action(_MEDIA[word], video=target in ("video", "youtube"))
     return None
+
+
+_CALENDAR_RE = re.compile(
+    r"(?:what'?s|what is|show me|check|read|what do i have)\s+(?:on\s+)?(?:my\s+)?"
+    r"(?:calendar|schedule|agenda)?\s*(?:for\s+)?(today|tomorrow|this week)?"
+    r"|(?:my\s+)?(?:calendar|schedule|agenda)(?:\s+for)?\s*(today|tomorrow|this week)?")
+
+
+def _calendar(low: str) -> QuickAction | None:
+    """ "what's on my calendar", "my schedule tomorrow", "what do I have this week" """
+    m = _CALENDAR_RE.fullmatch(low)
+    if not m or not re.search(r"calendar|schedule|agenda|what do i have", low):
+        return None
+    when = m.group(1) or m.group(2) or "today"
+    if when == "today":
+        return QuickAction("calendar_today", {}, "")
+    if when == "tomorrow":
+        return QuickAction("calendar_events", {"start_in_days": 1, "days": 1}, "")
+    return QuickAction("calendar_events", {"start_in_days": 0, "days": 7}, "")
 
 
 def media_action(verb: str, video: bool = False) -> QuickAction | None:
