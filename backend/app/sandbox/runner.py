@@ -28,12 +28,30 @@ from ..config import JARVIS_HOME
 PROJECTS_DIR = JARVIS_HOME / "projects"
 PROJECTS_DIR.mkdir(exist_ok=True)
 
+# Later rules win in SBPL. Reads stay open in general (runtimes need the
+# system), but secrets and personal data are closed, and Apple Events are
+# denied — `osascript` could otherwise tell Terminal to run anything outside
+# the sandbox.
+PRIVATE_DIRS = [".ssh", ".aws", ".gnupg", ".jarvis", ".docker", ".kube", ".netrc",
+                "Library/Messages", "Library/Mail", "Library/Keychains", "Library/Cookies",
+                "Library/Safari", "Library/Application Support/Google/Chrome",
+                "Library/Containers/com.apple.mail", "Library/Group Containers"]
+
 PROFILE = """(version 1)
 (allow default)
 (deny network*)
+(deny appleevent-send)
+(deny file-read* {private})
 (deny file-write*)
-(allow file-write* (subpath "{workdir}") (subpath "/private/var/folders") (subpath "/dev"))
+(allow file-read* file-write* (subpath "{workdir}"))
+(allow file-write* (subpath "/private/var/folders") (subpath "/dev"))
 """
+
+
+def _profile(workdir: Path) -> str:
+    home = Path.home()
+    private = " ".join(f'(subpath "{home / d}")' for d in PRIVATE_DIRS)
+    return PROFILE.format(workdir=str(workdir.resolve()), private=private)
 
 LANGS: dict[str, dict] = {
     "python":     {"ext": "py",   "bin": "python3"},
@@ -183,7 +201,7 @@ async def run(code: str = "", language: str = "python", timeout: int = 30,
                "PYTHONPATH": str(workdir / "_deps"),
                "GOCACHE": str(workdir / "_gocache"),
                "TMPDIR": str(workdir)}
-        profile = PROFILE.format(workdir=str(workdir.resolve()))
+        profile = _profile(workdir)  # projects live in ~/.jarvis: re-allowed by workdir
         sandboxed = ["sandbox-exec", "-p", profile] + run_cmd
         logs.append("executing (sandboxed): " + " ".join(run_cmd))
 
@@ -198,7 +216,8 @@ async def run(code: str = "", language: str = "python", timeout: int = 30,
         return {"exit_code": rc, "stdout": out[-10000:], "stderr": err[-10000:],
                 "logs": logs, "seconds": round(time.time() - started, 2),
                 "project": _slug(project) if persistent else None,
-                "sandbox": "no network, writes confined to the project folder"}
+                "sandbox": "no network, no Apple Events, writes confined to the project "
+                           "folder, private folders unreadable"}
     finally:
         if not persistent and language != "html":
             shutil.rmtree(workdir, ignore_errors=True)

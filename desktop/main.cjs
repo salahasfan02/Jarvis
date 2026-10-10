@@ -44,10 +44,14 @@ let quickWindow = null;
 let tray = null;
 let backendProc = null;
 
+// The built UI is served by the backend (same origin as the API) rather than
+// from file://, whose "null" origin the backend refuses: any website can
+// borrow that origin with a sandboxed iframe.
+const APP_URL = "http://127.0.0.1:8765/app/";
+
 function quickUrl() {
   if (isDev && !fs.existsSync(PROD_INDEX)) return `${DEV_URL}/quick.html`;
-  const local = path.join(path.dirname(PROD_INDEX), "quick.html");
-  return "file://" + local;
+  return `${APP_URL}quick.html`;
 }
 
 const isDev = !app.isPackaged;
@@ -61,7 +65,24 @@ function startBackend() {
   checkBackend((up) => {
     if (up) return;
     const python = path.join(BACKEND_DIR, ".venv", "bin", "python");
-    backendProc = spawn(python, ["run.py"], { cwd: BACKEND_DIR, stdio: "ignore" });
+    // Packaged: serve the UI bundled in the .app; dev: the repo's frontend/dist.
+    const env = { ...process.env };
+    if (app.isPackaged) env.JARVIS_UI_DIR = path.dirname(PROD_INDEX);
+    backendProc = spawn(python, ["run.py"], { cwd: BACKEND_DIR, stdio: "ignore", env });
+  });
+}
+
+/** Load the built UI from the backend once it answers (it may still be starting). */
+function loadFromBackend(win, url = APP_URL, tries = 0) {
+  checkBackend((up) => {
+    if (win.isDestroyed()) return;
+    if (up) return win.loadURL(url);
+    if (tries === 0) {
+      win.loadURL("data:text/html," + encodeURIComponent(
+        "<body style='background:#000;color:#3f6;font:14px monospace;display:grid;" +
+        "place-items:center;height:100vh;margin:0'>Starting Jarvis…</body>"));
+    }
+    if (tries < 60) setTimeout(() => loadFromBackend(win, url, tries + 1), 500);
   });
 }
 
@@ -70,8 +91,8 @@ function loadUI(win) {
   else if (isDev) {
     // Dev with a built frontend available: prefer live Vite if it responds.
     http.get(DEV_URL, () => win.loadURL(DEV_URL))
-      .on("error", () => win.loadFile(PROD_INDEX));
-  } else win.loadFile(PROD_INDEX);
+      .on("error", () => loadFromBackend(win));
+  } else loadFromBackend(win);
 }
 
 function createMainWindow() {

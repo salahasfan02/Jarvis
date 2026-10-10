@@ -17,9 +17,33 @@ from .security import audit
 _task: asyncio.Task | None = None
 
 
+PREFERRED = ("qwen2.5", "qwen3", "llama3.1", "llama3.2", "llama3", "mistral", "gemma")
+
+
+def pick_installed(configured: str, installed: list[str]) -> str | None:
+    """If the configured chat model isn't installed (the default is llama3.1,
+    the README suggests qwen2.5:14b), choose one that is — a tool-capable
+    family first, never an embedding model. None = keep the configured one."""
+    names = [n for n in installed if "embed" not in n.lower()]
+    if not names or any(n == configured or n.split(":")[0] == configured for n in names):
+        return None
+    for family in PREFERRED:
+        for n in names:
+            if n.startswith(family):
+                return n
+    return names[0]
+
+
 async def _models() -> None:
     if not await ollama_client.is_up():
         return
+    try:
+        installed = [m.get("name", "") for m in await ollama_client.list_models()]
+    except Exception:
+        installed = []
+    if pick := pick_installed(settings.get("ollama.model", ""), installed):
+        audit.log("model_auto_selected", was=settings.get("ollama.model"), now=pick)
+        settings.update({"ollama": {"model": pick}})
     chat = settings.get("ollama.model")
     await ollama_client.preload(chat)
     utility = ollama_client.model_for("utility")
