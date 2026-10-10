@@ -8,7 +8,7 @@
  * Dev:  npm start          (loads http://localhost:5173 from `npm run dev`)
  * Prod: build the frontend first (npm run build in ../frontend), then package.
  */
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, nativeImage, screen, shell } = require("electron");
 
 // The wake word needs audio running without a click first, and the listener
 // must keep working while the window is hidden or behind other apps.
@@ -106,7 +106,8 @@ function createMainWindow() {
     vibrancy: "under-window",
     visualEffectState: "active",
     backgroundColor: "#00000000",
-    webPreferences: { contextIsolation: true, backgroundThrottling: false },
+    webPreferences: { contextIsolation: true, backgroundThrottling: false,
+                      preload: path.join(__dirname, "main-preload.cjs") },
   });
   loadUI(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -115,6 +116,29 @@ function createMainWindow() {
   });
   mainWindow.on("closed", () => (mainWindow = null));
 }
+
+// Moving the window by the page's title strip: follow the pointer from
+// press to release (the page reports both).
+let dragTimer = null;
+ipcMain.on("window-drag", (event, what) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  clearInterval(dragTimer);
+  dragTimer = null;
+  if (!win || win.isDestroyed()) return;
+  if (what === "zoom") {
+    win.isMaximized() ? win.unmaximize() : win.maximize();
+    return;
+  }
+  if (what !== "start") return;
+  const start = screen.getCursorScreenPoint();
+  const [wx, wy] = win.getPosition();
+  const stopAt = Date.now() + 60_000;   // never follow the pointer forever
+  dragTimer = setInterval(() => {
+    if (win.isDestroyed() || Date.now() > stopAt) { clearInterval(dragTimer); return; }
+    const p = screen.getCursorScreenPoint();
+    win.setPosition(wx + p.x - start.x, wy + p.y - start.y);
+  }, 8);
+});
 
 function toggleFloatWindow() {
   if (floatWindow && !floatWindow.isDestroyed()) {
