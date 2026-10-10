@@ -9,6 +9,10 @@
  * Prod: build the frontend first (npm run build in ../frontend), then package.
  */
 const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, nativeImage, shell } = require("electron");
+
+// The wake word needs audio running without a click first, and the listener
+// must keep working while the window is hidden or behind other apps.
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
@@ -80,7 +84,7 @@ function createMainWindow() {
     vibrancy: "under-window",
     visualEffectState: "active",
     backgroundColor: "#00000000",
-    webPreferences: { contextIsolation: true },
+    webPreferences: { contextIsolation: true, backgroundThrottling: false },
   });
   loadUI(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -109,7 +113,7 @@ function toggleFloatWindow() {
     backgroundColor: "#00000000",
     resizable: true,
     skipTaskbar: true,
-    webPreferences: { contextIsolation: true },
+    webPreferences: { contextIsolation: true, backgroundThrottling: false },
   });
   loadUI(floatWindow);
 }

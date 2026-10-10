@@ -288,7 +288,9 @@ export default function App() {
   useEffect(() => {
     const check = () =>
       fetch(`${API}/stt/status`).then((r) => r.json())
-        .then((s) => setSttReady(!!s.available)).catch(() => setSttReady(false));
+        // A failed check (backend busy or restarting) keeps the current engine:
+        // switching engines drops the microphone mid-sentence.
+        .then((s) => setSttReady(!!s.available)).catch(() => {});
     check();
     const t = setInterval(check, 20000);
     return () => clearInterval(t);
@@ -296,11 +298,15 @@ export default function App() {
 
   const useWhisper = (settings?.voice?.stt_engine ?? "whisper") === "whisper" && sttReady;
 
+  // The engine is built once per engine type; it reaches `send` through a ref
+  // so re-renders never tear down the microphone.
+  const sendRef = useRef(send);
+  sendRef.current = send;
   const voice = useMemo(() => {
     const opts = {
       language: "en-US",
-      wakeWords: ["jarvis"],
-      onTranscript: (text: string) => { lastInputWasVoice.current = true; send(text); },
+      wakeWords: settingsRef.current?.assistant?.wake_words ?? ["jarvis"],
+      onTranscript: (text: string) => { lastInputWasVoice.current = true; sendRef.current(text); },
       onInterim: setInterim,
       onWake: () => {
         stopSpeaking();
@@ -312,7 +318,7 @@ export default function App() {
     if (useWhisper) return new WhisperVoiceEngine(opts);
     if (!speechSupported) return null;
     return new VoiceEngine(opts);
-  }, [send, useWhisper]);
+  }, [useWhisper]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // stop the previous engine whenever the engine instance is replaced
   useEffect(() => () => voice?.stop(), [voice]);

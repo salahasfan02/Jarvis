@@ -6,6 +6,8 @@
  *                  word is heard, the following speech becomes the command.
  */
 
+import { findWake } from "./wake";
+
 const SR: any =
   (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -92,15 +94,13 @@ export class VoiceEngine {
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const t: string = ev.results[i][0].transcript;
         if (!this.awake) {
-          const lower = t.toLowerCase();
-          const wake = this.opts.wakeWords.find((w) => lower.includes(w.toLowerCase()));
-          if (wake) {
+          const match = findWake(t, this.opts.wakeWords);
+          if (match) {
             this.awake = true;
             this.opts.onWake();
             this.opts.onStateChange("listening");
             // Anything said after the wake word in the same result counts.
-            const after = lower.split(wake.toLowerCase()).slice(1).join(" ").trim();
-            if (after && ev.results[i].isFinal) command += after + " ";
+            if (match.command && ev.results[i].isFinal) command += match.command + " ";
           }
         } else {
           if (ev.results[i].isFinal) command += t + " ";
@@ -144,21 +144,211 @@ export class VoiceEngine {
 
 // ---- offline speech recognition (Whisper) -----------------------------------
 //
-// Same public interface as VoiceEngine, but audio is captured with
-// MediaRecorder and transcribed by the local Whisper model on the backend.
-// Works in every browser (no Chrome dependency, no cloud).
+// Same public interface as VoiceEngine; audio is transcribed by the local
+// Whisper model on the backend, so it works in every browser with no cloud.
+//
+// The microphone is captured CONTINUOUSLY and cut into utterances by a small
+// voice-activity detector that runs on the audio clock. The previous design
+// recorded fixed clips with MediaRecorder and checked loudness on a timer,
+// which is why the wake word was missed so often:
+//  - nothing was recorded while a clip was being transcribed, and words that
+//    straddled a clip boundary were cut ("Jarvis" -> "…arvis");
+//  - a fixed loudness bar ignored normal speech at a distance from the mic;
+//  - timers in a background tab run once a second at best, so detection fell
+//    apart whenever Jarvis wasn't the front tab;
+//  - if the mic dropped (AirPods, another app), the loop died silently while
+//    the UI still said "listening".
+
+const TARGET_RATE = 16000;   // what Whisper wants
+
+/** Mono PCM -> 16-bit WAV at 16 kHz (tiny, and decodes everywhere). */
+function encodeWav(chunks: Float32Array[], rate: number): Blob {
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const ratio = rate / TARGET_RATE;
+  const outLen = Math.floor(total / ratio);
+  const pcm = new Int16Array(outLen);
+  let ci = 0, offset = 0;  // walk the chunks without concatenating them
+  const sampleAt = (idx: number) => {
+    while (ci < chunks.length && idx - offset >= chunks[ci].length) {
+      offset += chunks[ci].length;
+      ci++;
+    }
+    return ci < chunks.length ? chunks[ci][idx - offset] : 0;
+  };
+  for (let i = 0; i < outLen; i++) {
+    // average the source samples that fall into this output sample (anti-alias)
+    const from = Math.floor(i * ratio), to = Math.max(from + 1, Math.floor((i + 1) * ratio));
+    let acc = 0;
+    for (let k = from; k < to; k++) acc += sampleAt(k);
+    const v = Math.max(-1, Math.min(1, acc / (to - from)));
+    pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  const buf = new ArrayBuffer(44 + pcm.byteLength);
+  const dv = new DataView(buf);
+  const str = (o: number, t: string) => [...t].forEach((c, k) => dv.setUint8(o + k, c.charCodeAt(0)));
+  str(0, "RIFF"); dv.setUint32(4, 36 + pcm.byteLength, true); str(8, "WAVE");
+  str(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, TARGET_RATE, true); dv.setUint32(28, TARGET_RATE * 2, true);
+  dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  str(36, "data"); dv.setUint32(40, pcm.byteLength, true);
+  new Int16Array(buf, 44).set(pcm);
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+/** Continuous mic capture + voice-activity detection. Emits whole utterances
+ *  (with pre-roll) while capture keeps running. Everything is driven by the
+ *  audio callback, which browsers don't throttle in background tabs. */
+class MicSegmenter {
+  silenceMs = 700;          // quiet time that ends an utterance
+  maxMs = 8000;             // longest utterance before it's cut anyway
+  onSegment: (wav: Blob, ms: number) => void = () => {};
+  onLevel: (level: number) => void = () => {};
+  onDead: () => void = () => {};
+  onSuspended: (suspended: boolean) => void = () => {};
+
+  private stream: MediaStream | null = null;
+  private ctx: AudioContext | null = null;
+  private node: ScriptProcessorNode | null = null;
+  private rate = 48000;
+  private frameMs = 21;
+  private floor = 0.002;    // running estimate of the room's noise (RMS)
+  private preRoll: Float32Array[] = [];
+  private segment: Float32Array[] = [];
+  private segRms: number[] = [];
+  private inSpeech = false;
+  private loudRun = 0;
+  private quietMs = 0;
+  private speechMs = 0;
+  private lastFrameAt = 0;
+  private watchdog: any = null;
+  private resumeOnGesture = () => this.ctx?.resume().catch(() => {});
+
+  get running() { return !!this.stream?.active && !!this.ctx; }
+
+  async start(): Promise<boolean> {
+    if (this.running) return true;
+    this.stop();
+    try {
+      // Echo cancellation keeps Jarvis's own voice out; auto gain helps quiet speech.
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    } catch {
+      return false;
+    }
+    this.ctx = new AudioContext();
+    this.rate = this.ctx.sampleRate;
+    const src = this.ctx.createMediaStreamSource(this.stream);
+    const size = 1024;
+    this.frameMs = (size / this.rate) * 1000;
+    this.node = this.ctx.createScriptProcessor(size, 1, 1);
+    this.node.onaudioprocess = (ev) => this.frame(ev.inputBuffer.getChannelData(0));
+    src.connect(this.node);
+    this.node.connect(this.ctx.destination);  // ScriptProcessor only runs when connected
+    // An AudioContext made before any click starts "suspended" and hears nothing.
+    this.ctx.resume().catch(() => {});
+    window.addEventListener("pointerdown", this.resumeOnGesture);
+    window.addEventListener("keydown", this.resumeOnGesture);
+    this.stream.getAudioTracks().forEach((t) => (t.onended = () => this.onDead()));
+    this.lastFrameAt = performance.now();
+    // If audio stops flowing (device change, mic taken), report it so the
+    // engine restarts capture instead of pretending to listen.
+    let wasSuspended = false;
+    this.watchdog = setInterval(() => {
+      const suspended = this.ctx?.state === "suspended";
+      if (suspended !== wasSuspended) this.onSuspended((wasSuspended = suspended));
+      if (suspended) this.ctx!.resume().catch(() => {});
+      else if (performance.now() - this.lastFrameAt > 4000) this.onDead();
+    }, 1000);
+    return true;
+  }
+
+  stop() {
+    clearInterval(this.watchdog);
+    window.removeEventListener("pointerdown", this.resumeOnGesture);
+    window.removeEventListener("keydown", this.resumeOnGesture);
+    if (this.node) this.node.onaudioprocess = null;
+    this.node?.disconnect();
+    this.stream?.getTracks().forEach((t) => { t.onended = null; t.stop(); });
+    this.ctx?.close().catch(() => {});
+    this.node = null; this.stream = null; this.ctx = null;
+    this.resetSegment();
+  }
+
+  /** Drop anything half-heard (e.g. when switching modes). */
+  resetSegment() {
+    this.inSpeech = false; this.segment = []; this.segRms = [];
+    this.loudRun = 0; this.quietMs = 0; this.speechMs = 0;
+  }
+
+  private frame(input: Float32Array) {
+    this.lastFrameAt = performance.now();
+    const data = new Float32Array(input);  // the browser reuses its buffer
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    const rms = Math.sqrt(sum / data.length);
+    // Speech = clearly above the room's own noise, with a floor so a silent
+    // room doesn't turn breathing into "speech".
+    const threshold = Math.max(this.floor * 2.5, 0.0035);
+    this.onLevel(Math.min(1, rms / 0.1));
+
+    if (!this.inSpeech) {
+      // follow the noise floor: quickly down, slowly up
+      this.floor = rms < this.floor ? this.floor * 0.8 + rms * 0.2 : this.floor * 0.995 + rms * 0.005;
+      this.preRoll.push(data);
+      const keep = Math.ceil(400 / this.frameMs);   // 0.4 s before speech starts
+      if (this.preRoll.length > keep) this.preRoll.shift();
+      this.loudRun = rms > threshold ? this.loudRun + 1 : 0;
+      if (this.loudRun >= 2) {
+        this.inSpeech = true;
+        this.segment = [...this.preRoll];
+        this.segRms = [];
+        this.preRoll = [];
+        this.quietMs = 0;
+        this.speechMs = 0;
+      }
+      return;
+    }
+    this.segment.push(data);
+    this.segRms.push(rms);
+    const loud = rms > threshold * 0.8;  // hysteresis: don't end on a soft syllable
+    this.quietMs = loud ? 0 : this.quietMs + this.frameMs;
+    if (loud) this.speechMs += this.frameMs;
+    const segMs = this.segment.length * this.frameMs;
+    if (this.quietMs >= this.silenceMs || segMs >= this.maxMs) {
+      if (segMs >= this.maxMs) {
+        // Constant noise (a fan, music) kept the "speech" going: learn it as
+        // the new floor so it stops counting as talking.
+        const sorted = [...this.segRms].sort((a, b) => a - b);
+        this.floor = Math.max(this.floor, sorted[Math.floor(sorted.length / 2)] * 0.9);
+      }
+      const segment = this.segment, speech = this.speechMs;
+      this.resetSegment();
+      if (speech >= 200) this.onSegment(encodeWav(segment, this.rate), segMs);  // not a click
+    }
+  }
+}
 
 export class WhisperVoiceEngine {
   private opts: VoiceOptions;
   private mode: "off" | "ptt" | "wake" = "off";
-  private stream: MediaStream | null = null;
-  private audioCtx: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
-  private buf = new Uint8Array(new ArrayBuffer(0));
-  private generation = 0;   // bumped on stop() to cancel in-flight loops
+  private mic = new MicSegmenter();
+  private queue: Blob[] = [];
+  private working = false;
+  private awaitingCommand = false;
+  private commandTimer: any = null;
+  private pttTimer: any = null;
+  private generation = 0;   // bumped on stop() to drop in-flight results
 
   constructor(opts: VoiceOptions) {
     this.opts = opts;
+    this.mic.onSegment = (wav) => { this.queue.push(wav); this.drain(); };
+    this.mic.onLevel = (level) => voiceBus.dispatchEvent(new CustomEvent("mic-level", { detail: level }));
+    this.mic.onDead = () => this.restartCapture();
+    // Browsers keep audio off until the page has been clicked once; say so
+    // instead of silently not hearing anything.
+    this.mic.onSuspended = (suspended) =>
+      this.opts.onInterim(suspended ? "Click anywhere so I can hear you" : "");
   }
 
   update(opts: Partial<VoiceOptions>) {
@@ -166,72 +356,25 @@ export class WhisperVoiceEngine {
   }
 
   private async ensureMic(): Promise<boolean> {
-    if (this.stream?.active) return true;
-    try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      this.opts.onPermissionDenied?.();
-      return false;
+    if (await this.mic.start()) return true;
+    this.opts.onPermissionDenied?.();
+    return false;
+  }
+
+  private async restartCapture() {
+    const mode = this.mode;
+    if (mode === "off") return;
+    this.mic.stop();
+    await new Promise((r) => setTimeout(r, 500));
+    if (this.mode === mode && !(await this.mic.start())) {
+      setTimeout(() => this.restartCapture(), 3000);  // mic busy: keep trying
     }
-    this.audioCtx = new AudioContext();
-    const src = this.audioCtx.createMediaStreamSource(this.stream);
-    this.analyser = this.audioCtx.createAnalyser();
-    this.analyser.fftSize = 512;
-    src.connect(this.analyser);
-    this.buf = new Uint8Array(new ArrayBuffer(this.analyser.fftSize));
-    return true;
   }
 
-  /** Rough loudness 0..128 (deviation from silence). */
-  private level(): number {
-    if (!this.analyser) return 0;
-    this.analyser.getByteTimeDomainData(this.buf);
-    let max = 0;
-    for (let i = 0; i < this.buf.length; i++) {
-      max = Math.max(max, Math.abs(this.buf[i] - 128));
-    }
-    return max;
-  }
-
-  /** Record until the speaker goes quiet (or limits hit). Returns null if no
-   *  speech was detected at all during the window. */
-  private recordClip(o: { maxMs: number; silenceMs: number; waitForSpeechMs: number }):
-      Promise<Blob | null> {
-    return new Promise((resolve) => {
-      const rec = new MediaRecorder(this.stream!);
-      const chunks: Blob[] = [];
-      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-      let spoke = false;
-      let quietFor = 0;
-      let waited = 0;
-      const tick = 80;
-      const timer = setInterval(() => {
-        const loud = this.level() > 10;
-        if (!spoke) {
-          waited += tick;
-          if (loud) spoke = true;
-          else if (waited >= o.waitForSpeechMs) finish();
-        } else {
-          quietFor = loud ? 0 : quietFor + tick;
-          if (quietFor >= o.silenceMs) finish();
-        }
-      }, tick);
-      const hardStop = setTimeout(finish, o.maxMs);
-
-      function finish() {
-        clearInterval(timer);
-        clearTimeout(hardStop);
-        if (rec.state !== "inactive") rec.stop();
-      }
-      rec.onstop = () => resolve(spoke ? new Blob(chunks, { type: rec.mimeType }) : null);
-      rec.start();
-    });
-  }
-
-  private async transcribe(blob: Blob): Promise<string> {
+  private async transcribe(blob: Blob, hint = ""): Promise<string> {
     try {
       const { API } = await import("./api");
-      const res = await fetch(`${API}/stt/transcribe`, {
+      const res = await fetch(`${API}/stt/transcribe?hint=${encodeURIComponent(hint)}`, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: blob,
@@ -243,68 +386,100 @@ export class WhisperVoiceEngine {
     }
   }
 
+  /** Transcribe utterances one at a time, in order; capture never pauses. */
+  private async drain() {
+    if (this.working) return;
+    this.working = true;
+    try {
+      while (this.queue.length) {
+        const wav = this.queue.shift()!;
+        const gen = this.generation;
+        const mode = this.mode;
+        const command = mode === "ptt" || this.awaitingCommand;
+        if (command) this.opts.onInterim("…");
+        const hint = this.opts.wakeWords.map((w) => w[0]?.toUpperCase() + w.slice(1)).join(", ");
+        const text = (await this.transcribe(wav, hint)).trim();
+        if (gen !== this.generation) return;
+        if (mode === "ptt") this.finishPtt(text);
+        else if (mode === "wake") this.onWakeText(text);
+      }
+    } finally {
+      this.working = false;
+    }
+  }
+
+  private finishPtt(text: string) {
+    clearTimeout(this.pttTimer);
+    this.opts.onInterim("");
+    this.mode = "off";
+    this.mic.stop();
+    this.opts.onStateChange("idle");
+    if (text) this.opts.onTranscript(text);
+  }
+
+  private onWakeText(text: string) {
+    if (this.awaitingCommand) {
+      this.endCommandWindow();
+      if (text) this.opts.onTranscript(text);
+      return;
+    }
+    const match = findWake(text, this.opts.wakeWords);
+    if (!match) return;
+    this.opts.onWake();
+    if (match.command) {
+      this.opts.onTranscript(match.command);   // "Jarvis, open YouTube" in one breath
+      return;
+    }
+    // Just "Jarvis": the next utterance is the command.
+    this.awaitingCommand = true;
+    this.mic.silenceMs = 1100;  // commands get a longer pause before they end
+    this.opts.onStateChange("listening");
+    clearTimeout(this.commandTimer);
+    this.commandTimer = setTimeout(() => this.endCommandWindow(), 8000);
+  }
+
+  private endCommandWindow() {
+    clearTimeout(this.commandTimer);
+    this.awaitingCommand = false;
+    this.mic.silenceMs = 700;
+    this.opts.onInterim("");
+    if (this.mode === "wake") this.opts.onStateChange("waiting-wake");
+  }
+
   async startListening() {
-    this.stop();
+    this.generation++;
+    this.queue = [];
+    this.endCommandWindow();
     if (!(await this.ensureMic())) return;
     this.mode = "ptt";
-    const gen = ++this.generation;
+    this.mic.resetSegment();
+    this.mic.silenceMs = 1200;
     this.opts.onStateChange("listening");
-    const blob = await this.recordClip({ maxMs: 25000, silenceMs: 1200,
-                                         waitForSpeechMs: 6000 });
-    if (gen !== this.generation) return;
-    this.opts.onInterim("…");
-    const text = blob ? await this.transcribe(blob) : "";
-    this.mode = "off";
-    this.opts.onInterim("");
-    this.opts.onStateChange("idle");
-    if (gen === this.generation && text) this.opts.onTranscript(text);
+    clearTimeout(this.pttTimer);
+    this.pttTimer = setTimeout(() => {   // nothing said: give up quietly
+      if (this.mode === "ptt" && !this.working) this.finishPtt("");
+    }, 7000);
   }
 
   async startWakeWord() {
-    this.stop();
+    this.generation++;
+    this.queue = [];
+    clearTimeout(this.pttTimer);
     if (!(await this.ensureMic())) return;
     this.mode = "wake";
-    const gen = ++this.generation;
-
-    while (this.mode === "wake" && gen === this.generation) {
-      this.opts.onStateChange("waiting-wake");
-      // listen in short clips; silent windows are skipped without transcribing
-      const clip = await this.recordClip({ maxMs: 5000, silenceMs: 900,
-                                           waitForSpeechMs: 4000 });
-      if (gen !== this.generation) return;
-      if (!clip) continue;
-      const heard = (await this.transcribe(clip)).toLowerCase();
-      if (gen !== this.generation) return;
-      const wake = this.opts.wakeWords.find((w) => heard.includes(w.toLowerCase()));
-      if (!wake) continue;
-
-      this.opts.onWake();
-      this.opts.onStateChange("listening");
-      // anything said after the wake word in the same clip starts the command
-      let command = heard.split(wake.toLowerCase()).slice(1).join(" ")
-        .replace(/^[\s,.!?]+/, "").trim();
-      if (command.split(/\s+/).filter(Boolean).length < 2) {
-        const cmdClip = await this.recordClip({ maxMs: 20000, silenceMs: 1200,
-                                                waitForSpeechMs: 7000 });
-        if (gen !== this.generation) return;
-        this.opts.onInterim("…");
-        const more = cmdClip ? await this.transcribe(cmdClip) : "";
-        command = (command + " " + more).trim();
-      }
-      this.opts.onInterim("");
-      if (gen !== this.generation) return;
-      if (command) this.opts.onTranscript(command);
-    }
+    this.mic.resetSegment();
+    this.endCommandWindow();
+    this.opts.onStateChange("waiting-wake");
   }
 
   stop() {
     this.generation++;
     this.mode = "off";
-    this.stream?.getTracks().forEach((t) => t.stop());
-    this.stream = null;
-    this.audioCtx?.close().catch(() => {});
-    this.audioCtx = null;
-    this.analyser = null;
+    this.queue = [];
+    clearTimeout(this.pttTimer);
+    clearTimeout(this.commandTimer);
+    this.awaitingCommand = false;
+    this.mic.stop();
     this.opts.onStateChange("idle");
   }
 
