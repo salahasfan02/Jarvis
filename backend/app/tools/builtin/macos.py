@@ -239,37 +239,6 @@ def calendar_create_event(title: str, start: str, end: str = "", location: str =
 
 
 @tool(
-    name="calendar_events",
-    description="List Apple Calendar events in a date range (defaults to the next 7 days).",
-    parameters={
-        "type": "object",
-        "properties": {
-            "days_ahead": {"type": "integer", "description": "how many days from today (default 7)"},
-        },
-    },
-    risk="confirm",
-    agent_tags=["automation", "calendar"],
-)
-def calendar_events(days_ahead: int = 7) -> str:
-    script = f'''
-    set output to ""
-    set today to current date
-    set startOfDay to today - (time of today)
-    set endWindow to startOfDay + {max(1, min(days_ahead, 60))} * days
-    tell application "Calendar"
-        repeat with cal in calendars
-            set evs to (every event of cal whose start date >= startOfDay and start date < endWindow)
-            repeat with ev in evs
-                set output to output & (start date of ev as string) & " — " & (summary of ev) & "\\n"
-            end repeat
-        end repeat
-    end tell
-    return output'''
-    result = _osascript(script, timeout=90)
-    return result if result not in ("", "OK") else "No events in that range."
-
-
-@tool(
     name="create_reminder",
     description="Create a reminder in Apple Reminders. due is optional, format 'YYYY-MM-DD HH:MM'.",
     parameters={
@@ -289,33 +258,6 @@ def create_reminder(title: str, due: str = "") -> str:
             f'{{name:"{_q(title)}", due date:dueDate}}')
     return _osascript(
         f'tell application "Reminders" to make new reminder with properties {props}')
-
-
-@tool(
-    name="calendar_today",
-    description="List today's events from Apple Calendar.",
-    parameters={"type": "object", "properties": {}},
-    risk="confirm",
-    agent_tags=["automation"],
-)
-def calendar_today() -> str:
-    script = '''
-    set output to ""
-    set today to current date
-    set startOfDay to today - (time of today)
-    set endOfDay to startOfDay + 1 * days
-    tell application "Calendar"
-        repeat with cal in calendars
-            set evs to (every event of cal whose start date >= startOfDay and start date < endOfDay)
-            repeat with ev in evs
-                set output to output & (start date of ev as string) & " - " & (summary of ev) & "\n"
-            end repeat
-        end repeat
-    end tell
-    return output
-    '''
-    result = _osascript(script, timeout=60)
-    return result if result != "OK" else "No events today."
 
 
 @tool(

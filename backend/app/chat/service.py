@@ -18,6 +18,7 @@ import datetime
 import functools
 import json
 import os
+import re
 import time
 from typing import AsyncIterator
 
@@ -195,6 +196,48 @@ def _round_timing(chunk: dict) -> dict:
             "load_ms": round(chunk.get("load_duration", 0) / ms)}
 
 
+# "Send" vs "draft": with both tools on offer, a small local model often picks
+# the wrong one — or writes "I've drafted it" and calls nothing at all.
+_SAYS_DRAFT = re.compile(r"\b(draft|prepare|compose|write up)\b", re.I)
+_SAYS_SEND = re.compile(
+    r"\b(send|shoot|fire off)\b[^.?!]*\b(e-?mails?|mail|reply|it)\b"
+    r"|^\s*(?:please\s+|can you\s+|could you\s+)?e-?mail\s+\w"
+    r"|\breply\b[^.?!]*\band send\b", re.I)
+
+
+def _for_intent(user_content: str, tool_list: list[tools.Tool]) -> list[tools.Tool]:
+    """Offer only the send tools when the user plainly says send, only the
+    draft tools when they say draft (and not send)."""
+    dont_send = re.search(r"\b(?:don'?t|do not|not|never|without)\s+(?:send|sending)\b",
+                          user_content, re.I)
+    if dont_send or (_SAYS_DRAFT.search(user_content)
+                     and not re.search(r"\bsend\b", user_content, re.I)):
+        drop = {"send_email", "send_reply"}
+    elif _SAYS_SEND.search(user_content):
+        drop = {"draft_email", "draft_reply"}
+    else:
+        return tool_list
+    return [t for t in tool_list if t.name not in drop]
+
+
+_CLAIMS_ACTION = re.compile(
+    r"\b(?:i(?:'ve| have)?|i just)\s+(?:sent|drafted|emailed|replied|opened|created|"
+    r"scheduled|added|saved|moved|deleted|played|booked|set up|forwarded)\b"
+    r"|\bhas been (?:sent|drafted|created|scheduled|saved|added)\b", re.I)
+_ASKS_ACTION = re.compile(
+    r"\b(send|e-?mail|draft|reply|forward|open|create|schedule|add|play|save|move|"
+    r"delete|book|remind|text)\b", re.I)
+_ASKS_ABOUT_PAST = re.compile(r"^\s*(did|have|has|was|were|is|are|why|when)\b", re.I)
+CLAIM_NUDGE = ("(You said you did that, but you didn't call any tool — so nothing actually "
+               "happened. Call the tool that does it now, or tell me plainly that you can't.)")
+
+
+def _pretends(user_content: str, reply: str) -> bool:
+    """The reply claims an action the user asked for, though no tool ran."""
+    return (bool(_ASKS_ACTION.search(user_content)) and not _ASKS_ABOUT_PAST.match(user_content)
+            and bool(_CLAIMS_ACTION.search(reply)))
+
+
 EMPTY_NUDGE = ("(Your last reply was empty. Either call the tool that does what I "
                "asked, or answer me in words.)")
 EMPTY_FALLBACK = ("Sorry — I didn't manage to do that. Could you say it another way?")
@@ -278,7 +321,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
             llm_messages.insert(1, {"role": "system", "content": block})
 
     use_tools = settings.get("tools.enabled", True)
-    tool_list = _tools_for(agent) if use_tools else []
+    tool_list = _for_intent(user_content, _tools_for(agent)) if use_tools else []
     tool_schemas = [t.to_ollama() for t in tool_list] or None
 
     full_response = ""
@@ -287,6 +330,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
     rounds: list[dict] = []
     first_token_ms = None
     nudged = False
+    claim_checked = False
 
     try:
         round_no = 0
@@ -313,6 +357,16 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                     break
 
             if not tool_calls:
+                if (tool_schemas and not tool_events and not claim_checked
+                        and _pretends(user_content, full_response)):
+                    # "I've drafted the email" with no tool call: nothing happened.
+                    # Drop the false claim and make the model act or admit it can't.
+                    claim_checked = True
+                    audit.log("claimed_without_tool", agent=agent.id, reply=full_response[:200])
+                    llm_messages.append({"role": "assistant", "content": round_text})
+                    llm_messages.append({"role": "user", "content": CLAIM_NUDGE})
+                    full_response = ""
+                    continue
                 if full_response.strip() or nudged:
                     break
                 # Local models occasionally return nothing at all (no words, no

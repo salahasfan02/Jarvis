@@ -70,6 +70,13 @@ TOOL_LABELS = {
     "draft_email": "✉️ Drafting the email",
     "send_email": "📨 Sending the email",
     "music_play": "🎵 Starting the music",
+    "read_emails": "📬 Checking your inbox",
+    "search_emails": "🔎 Searching your mail",
+    "read_email": "📧 Reading the email",
+    "draft_reply": "✉️ Drafting the reply",
+    "send_reply": "📨 Sending the reply",
+    "calendar_events": "📅 Checking your calendar",
+    "calendar_today": "📅 Checking your calendar",
 }
 
 _YES = {"yes", "y", "yeah", "yep", "yup", "ok", "okay", "sure", "allow", "approve",

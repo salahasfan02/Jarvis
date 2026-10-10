@@ -8,6 +8,28 @@
 
 import { findWake } from "./wake";
 
+export const voiceBus = new EventTarget();
+
+/** What the voice pipeline is doing right now — shown in Settings → Voice
+ *  ("Voice check") and used for hints, so a failure is never silent. */
+export interface VoiceDiag {
+  engine: "whisper" | "browser" | "none";
+  mic: "off" | "starting" | "on" | "suspended" | "blocked" | "restarting" | "error";
+  error: string;
+  heard: { at: number; text: string; woke: boolean }[];
+}
+export const voiceDiag: VoiceDiag = { engine: "none", mic: "off", error: "", heard: [] };
+
+function diag(patch: Partial<VoiceDiag>) {
+  Object.assign(voiceDiag, patch);
+  voiceBus.dispatchEvent(new CustomEvent("voice-diag", { detail: { ...voiceDiag } }));
+}
+
+function noteHeard(text: string, woke: boolean) {
+  if (!text.trim()) return;
+  diag({ heard: [{ at: Date.now(), text, woke }, ...voiceDiag.heard].slice(0, 8) });
+}
+
 const SR: any =
   (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -28,6 +50,7 @@ export class VoiceEngine {
   private opts: VoiceOptions;
   private mode: "off" | "ptt" | "wake" = "off";
   private awake = false;
+  private networkErrors = 0;
 
   constructor(opts: VoiceOptions) {
     this.opts = opts;
@@ -78,6 +101,7 @@ export class VoiceEngine {
     this.stop();
     this.mode = "wake";
     this.awake = false;
+    diag({ engine: "browser", mic: "on", error: "" });
     const rec = this.build(true);
     let command = "";
     let commandTimer: any = null;
@@ -91,8 +115,10 @@ export class VoiceEngine {
     };
 
     rec.onresult = (ev: any) => {
+      this.networkErrors = 0;
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const t: string = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) noteHeard(t, !!findWake(t, this.opts.wakeWords));
         if (!this.awake) {
           const match = findWake(t, this.opts.wakeWords);
           if (match) {
@@ -111,15 +137,29 @@ export class VoiceEngine {
       }
     };
     rec.onend = () => {
-      if (this.mode === "wake") {
+      // A browser without a working speech service fails instantly, forever;
+      // don't spin — say so (below) and stop retrying.
+      if (this.mode === "wake" && this.networkErrors < 3) {
         try { rec.start(); } catch { /* restarting too fast is fine to ignore */ }
       }
     };
     rec.onerror = (e: any) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        diag({ mic: "blocked", error: "Microphone access is blocked for this page." });
         this.mode = "off";
         this.opts.onStateChange("idle");
         this.opts.onPermissionDenied?.();
+      } else if (e.error === "network") {
+        this.networkErrors++;
+        if (this.networkErrors >= 3) {
+          const msg = "This browser's speech recognition isn't available (the desktop app " +
+            "and Brave don't have it). Download Whisper in Settings → Voice.";
+          diag({ mic: "error", error: msg });
+          this.opts.onInterim(msg);
+        }
+      } else if (e.error === "audio-capture") {
+        diag({ mic: "error", error: "No microphone found." });
+        this.opts.onInterim("No microphone found — check System Settings → Sound → Input.");
       }
     };
     this.rec = rec;
@@ -129,6 +169,7 @@ export class VoiceEngine {
 
   stop() {
     this.mode = "off";
+    this.networkErrors = 0;
     if (this.rec) {
       this.rec.onend = null;
       try { this.rec.stop(); } catch { /* already stopped */ }
@@ -347,8 +388,10 @@ export class WhisperVoiceEngine {
     this.mic.onDead = () => this.restartCapture();
     // Browsers keep audio off until the page has been clicked once; say so
     // instead of silently not hearing anything.
-    this.mic.onSuspended = (suspended) =>
+    this.mic.onSuspended = (suspended) => {
+      diag({ mic: suspended ? "suspended" : "on" });
       this.opts.onInterim(suspended ? "Click anywhere so I can hear you" : "");
+    };
   }
 
   update(opts: Partial<VoiceOptions>) {
@@ -356,7 +399,14 @@ export class WhisperVoiceEngine {
   }
 
   private async ensureMic(): Promise<boolean> {
-    if (await this.mic.start()) return true;
+    diag({ engine: "whisper", mic: this.mic.running ? "on" : "starting" });
+    if (await this.mic.start()) {
+      diag({ mic: "on", error: "" });
+      return true;
+    }
+    diag({ mic: "blocked", error: "Microphone access was refused — allow it for this page/app." });
+    this.opts.onInterim("Microphone access was refused — allow it in your browser and in " +
+                        "System Settings → Privacy & Security → Microphone.");
     this.opts.onPermissionDenied?.();
     return false;
   }
@@ -364,6 +414,7 @@ export class WhisperVoiceEngine {
   private async restartCapture() {
     const mode = this.mode;
     if (mode === "off") return;
+    diag({ mic: "restarting" });
     this.mic.stop();
     await new Promise((r) => setTimeout(r, 500));
     if (this.mode === mode && !(await this.mic.start())) {
@@ -372,6 +423,7 @@ export class WhisperVoiceEngine {
   }
 
   private async transcribe(blob: Blob, hint = ""): Promise<string> {
+    let error = "";
     try {
       const { API } = await import("./api");
       const res = await fetch(`${API}/stt/transcribe?hint=${encodeURIComponent(hint)}`, {
@@ -379,11 +431,19 @@ export class WhisperVoiceEngine {
         headers: { "Content-Type": "application/octet-stream" },
         body: blob,
       });
-      const data = await res.json();
-      return data.text ?? "";
-    } catch {
-      return "";
+      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!data.error) {
+        if (voiceDiag.error) diag({ error: "" });
+        return data.text ?? "";
+      }
+      error = data.error;
+    } catch (e: any) {
+      error = `can't reach the Jarvis backend (${e?.message ?? e})`;
     }
+    // Never fail silently: this used to return "" and the wake word just "did nothing".
+    diag({ error: `Speech recognition failed: ${error}` });
+    this.opts.onInterim(`Speech recognition failed: ${error}`);
+    return "";
   }
 
   /** Transcribe utterances one at a time, in order; capture never pauses. */
@@ -400,6 +460,7 @@ export class WhisperVoiceEngine {
         const hint = this.opts.wakeWords.map((w) => w[0]?.toUpperCase() + w.slice(1)).join(", ");
         const text = (await this.transcribe(wav, hint)).trim();
         if (gen !== this.generation) return;
+        noteHeard(text, command || !!findWake(text, this.opts.wakeWords));
         if (mode === "ptt") this.finishPtt(text);
         else if (mode === "wake") this.onWakeText(text);
       }
@@ -475,6 +536,7 @@ export class WhisperVoiceEngine {
   stop() {
     this.generation++;
     this.mode = "off";
+    diag({ mic: "off" });
     this.queue = [];
     clearTimeout(this.pttTimer);
     clearTimeout(this.commandTimer);
@@ -490,11 +552,9 @@ export class WhisperVoiceEngine {
 
 // ---- text to speech ---------------------------------------------------------
 //
-// Speaking state + live amplitude are broadcast on `voiceBus` so the dashboard
-// core visualization can react to speech:
+// Speaking state + live amplitude are broadcast on `voiceBus` (declared at the
+// top) so the dashboard core visualization can react to speech:
 //   voiceBus events: "speaking" (detail: boolean), "amplitude" (detail: 0..1)
-
-export const voiceBus = new EventTarget();
 
 /** Short rising two-tone chime confirming Jarvis heard the wake word. */
 export function playWakeChime() {

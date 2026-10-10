@@ -90,11 +90,18 @@ register(Agent(
 
 register(Agent(
     id="messaging", name="Messaging & Email Agent",
-    description="Drafting, sending or managing messages and emails.",
-    prompt="You are in messaging mode. Write clear, well-toned messages. For email: if "
-           "the user says SEND, call send_email (they approve the exact message first); "
-           "if they say draft, write or prepare, call draft_email. Never send when they "
-           "only asked for a draft. iMessages can only be drafted — the user presses send.",
+    description="Reading, summarizing, drafting, sending and replying to email and messages.",
+    prompt="You are in messaging mode. You can really read and send the user's email "
+           "through Apple Mail — always do it with the tools, never just describe it.\n"
+           "- Send: if the user says SEND, call send_email (they approve the exact message "
+           "first). Draft/write/prepare: call draft_email. Never send a draft-only request.\n"
+           "- Read / summarize: call read_emails (unread_only for 'new' mail), then give one "
+           "line per email — sender, subject, the gist — and point out anything urgent or "
+           "needing a reply. Use read_email(id) for one email in full, search_emails to find "
+           "mail from someone or about something.\n"
+           "- Reply: find the email's id, then draft_reply, or send_reply when the user says "
+           "send. Sign as the user.\n"
+           "iMessages can only be drafted — the user presses send.",
     tool_tags=["messaging", "email"]))
 
 register(Agent(
@@ -132,6 +139,8 @@ _ROUTE_EXAMPLES: dict[str, list[str]] = {
     "files": ["organize the files on my desktop", "find my tax pdf in downloads",
               "move these screenshots into a folder", "rename all the photos"],
     "messaging": ["draft an email to my professor", "text John that I'm late",
+                  "summarize my emails", "do I have any new email",
+                  "reply to Sam's email", "send an email to my landlord",
                   "reply to Emma's message", "summarize my messages",
                   "did anyone text me today"],
     "automation": ["open safari", "close spotify", "create a note about the meeting",
@@ -189,7 +198,7 @@ _ROUTE_KEYWORDS: dict[str, list[str]] = {
     "files": ["file", "folder", "desktop", "downloads", "organize", "rename",
               "directory", "trash", "documents"],
     "messaging": ["email", "mail", "imessage", "message", "text him", "text her",
-                  "draft", "reply to", "inbox"],
+                  "draft", "reply to", "inbox", "unread"],
     "automation": ["open", "close", "launch", "quit", "safari", "chrome", "app",
                    "note", "reminder", "calendar", "clipboard", "tab", "window",
                    "youtube"],

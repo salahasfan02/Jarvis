@@ -31,6 +31,7 @@ export function DashboardPage(props: {
   wakeWord: string;
   wakeActive: boolean;
   voiceSupported: boolean;
+  voiceEngine: "whisper" | "browser";
   onToggleWake: () => void;
   onPushToTalk: () => void;
   coreDesign: CoreDesign;
@@ -142,11 +143,17 @@ export function DashboardPage(props: {
           )}
         </form>
         <div className="voice-hint">
-          {props.voiceState === "listening" && (props.interim || "Listening…")}
-          {props.voiceState === "waiting-wake" && !props.interim &&
-            `Say "${props.wakeWord}" — I'm listening`}
-          {props.voiceState === "idle" && props.voiceSupported && !props.wakeActive &&
-            <span className="inline-icon">Wake word off — press <Ear className="icon-sm" /> to enable</span>}
+          {/* The listener's own messages ("Click anywhere so I can hear you",
+              errors) win in every state — they were hidden while waiting. */}
+          {props.interim ? props.interim
+            : props.voiceState === "listening" ? "Listening…"
+            : props.voiceState === "waiting-wake"
+              ? (props.voiceEngine === "browser"
+                  ? `Say "${props.wakeWord}" — using the browser's recognizer; download Whisper in Settings → Voice for a reliable wake word`
+                  : `Say "${props.wakeWord}" — I'm listening`)
+            : props.voiceSupported && !props.wakeActive
+              ? <span className="inline-icon">Wake word off — press <Ear className="icon-sm" /> to enable</span>
+            : null}
         </div>
       </div>
 

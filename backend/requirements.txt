@@ -7,6 +7,7 @@ kokoro-onnx>=0.4
 faster-whisper>=1.0
 pyobjc-framework-Vision>=10
 pyobjc-framework-Quartz>=10
+pyobjc-framework-EventKit>=10
 pypdf>=4.0
 python-docx>=1.1
 openpyxl>=3.1

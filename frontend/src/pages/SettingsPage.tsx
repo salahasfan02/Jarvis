@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Gauge, ImagePlus, X } from "lucide-react";
+import { Check, Gauge, ImagePlus, X } from "lucide-react";
 import { API, api, OllamaModel, pullModel, statsApi } from "../lib/api";
+import { VoiceDiag, voiceBus, voiceDiag } from "../lib/voice";
 
 function Row(props: { label: string; sub?: string; children: React.ReactNode }) {
   return (
@@ -21,6 +22,63 @@ function Toggle(props: { checked: boolean; onChange: (v: boolean) => void }) {
              onChange={(e) => props.onChange(e.target.checked)} />
       <span />
     </label>
+  );
+}
+
+/** Live view of the voice pipeline, so "it doesn't hear me" can be diagnosed:
+ *  which engine runs, whether the mic is live, its level, what was heard. */
+function VoiceCheck() {
+  const [d, setD] = useState<VoiceDiag>({ ...voiceDiag });
+  const [level, setLevel] = useState(0);
+  useEffect(() => {
+    const onDiag = (e: Event) => setD((e as CustomEvent).detail);
+    let last = 0;
+    const onLevel = (e: Event) => {
+      const now = performance.now();
+      if (now - last > 80) { last = now; setLevel((e as CustomEvent).detail); }
+    };
+    voiceBus.addEventListener("voice-diag", onDiag);
+    voiceBus.addEventListener("mic-level", onLevel);
+    return () => {
+      voiceBus.removeEventListener("voice-diag", onDiag);
+      voiceBus.removeEventListener("mic-level", onLevel);
+    };
+  }, []);
+  const engine = { whisper: "Whisper (offline)", browser: "browser speech recognition",
+                   none: "not started" }[d.engine];
+  const mic = { off: "off", starting: "starting…", on: "live", blocked: "blocked",
+                suspended: "paused — click anywhere on the page", restarting: "reconnecting…",
+                error: "not working" }[d.mic];
+  return (
+    <>
+      <Row label="Voice check"
+           sub="Turn the wake word on and say “Jarvis”: the bar should move while you talk, and what Jarvis heard shows up below.">
+        <div className="voice-check">
+          <div className="sub">Engine: <b>{engine}</b> · Mic: <b>{mic}</b></div>
+          {d.engine === "whisper"
+            ? <div className="level-bar"><div style={{ width: `${Math.round(level * 100)}%` }} /></div>
+            : <div className="sub">(no level meter for the browser engine)</div>}
+        </div>
+      </Row>
+      {d.error && <div className="sub" style={{ color: "var(--danger)", padding: "2px 0 6px" }}>{d.error}</div>}
+      {d.engine === "browser" && (
+        <div className="sub" style={{ padding: "2px 0 6px" }}>
+          Download Whisper above for a reliable wake word — the browser's recognizer misses
+          words, needs the internet, and doesn't work at all in the desktop app or Brave.
+        </div>
+      )}
+      {d.heard.length > 0 && (
+        <div className="heard-list">
+          {d.heard.map((h) => (
+            <div key={h.at} className="inline-icon" style={{ justifyContent: "flex-start" }}>
+              {h.woke ? <Check className="icon-sm icon-ok" /> : <span className="heard-dot" />}
+              “{h.text}”
+              <span className="sub">{new Date(h.at).toLocaleTimeString()}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -592,6 +650,7 @@ export function SettingsPage(props: {
               </div>
             </Row>
           )}
+          <VoiceCheck />
           <Row label="Language" sub="Speech recognition language, e.g. en-US">
             <input type="text" value={s.voice.language}
                    onChange={(e) => props.onPatch({ voice: { language: e.target.value } })} />

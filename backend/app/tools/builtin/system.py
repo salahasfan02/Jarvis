@@ -345,21 +345,9 @@ async def daily_briefing() -> str:
         except Exception:
             return ""
 
-    events = await asyncio.to_thread(osa, '''
-    set output to ""
-    set today to current date
-    set startOfDay to today - (time of today)
-    set endOfDay to startOfDay + 1 * days
-    tell application "Calendar"
-        repeat with cal in calendars
-            set evs to (every event of cal whose start date >= startOfDay and start date < endOfDay)
-            repeat with ev in evs
-                set output to output & (start date of ev as string) & " — " & (summary of ev) & "\\n"
-            end repeat
-        end repeat
-    end tell
-    return output''')
-    parts.append("Today's calendar:\n" + (events or "No events today."))
+    from .calendars import events_text  # EventKit: fast, includes repeating events
+    events = await asyncio.to_thread(events_text, 0, 1)
+    parts.append("Today's calendar:\n" + events)
 
     reminders = await asyncio.to_thread(osa, '''
     set output to ""
