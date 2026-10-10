@@ -228,8 +228,9 @@ def create_word_document(title: str, content: str, filename: str = "") -> str:
 def _name_key(name: str) -> str:
     """Compare file names the way a person would. macOS writes screenshot times
     as 23.55.30 with a narrow no-break space before AM/PM; models write 23:55:30
-    with plain spaces, often without the extension."""
-    return re.sub(r"[\s\u202f\u00a0]+", " ", name.lower().replace(":", ".")).strip()
+    with plain spaces, often without the extension. Dashes and underscores
+    count as spaces: "Shopping List.docx" is shopping-list.docx."""
+    return re.sub(r"[\s\u202f\u00a0_-]+", " ", name.lower().replace(":", ".")).strip()
 
 
 def _mtime(p: Path) -> float:
@@ -263,6 +264,53 @@ def resolve_path(path: str) -> tuple[Path | None, list[str]]:
     names = {_name_key(c.name): c.name for c in candidates}
     close = [names[k] for k in difflib.get_close_matches(want, list(names), n=5, cutoff=0.6)]
     return None, list(dict.fromkeys([c.name for c in containing] + close))[:5]
+
+
+_SKIP_PARTS = {"Library", ".Trash", "node_modules", ".venv", "venv", "__pycache__",
+               ".git", "site-packages"}
+
+
+def _spotlight(name: str) -> list[Path]:
+    """Files named like `name` anywhere in the home folder, newest first,
+    leaving out caches, app data and code dependencies."""
+    try:
+        out = subprocess.run(["mdfind", "-onlyin", str(Path.home()), "-name", name],
+                             capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    home = Path.home()
+    hits = [Path(line) for line in out.splitlines()[:400] if line]
+    hits = [h for h in hits if h.is_relative_to(home)
+            and not _SKIP_PARTS.intersection(h.parts)
+            and not any(part.startswith(".") for part in h.relative_to(home).parts)]
+    return sorted(hits, key=_mtime, reverse=True)
+
+
+def find_file(query: str) -> tuple[Path | None, list[str]]:
+    """The file the user means — a full path, or just a name ("my CV",
+    "lease.pdf", "the Spain folder"). Desktop, Downloads and Documents first,
+    then Spotlight across the home folder. Returns (path, []) when there is one
+    clear match, else (None, candidate paths for the user to choose from)."""
+    query = query.strip().strip("'\"")
+    p, suggestions = resolve_path(query)
+    if p is not None:
+        return p, []
+    name = Path(query).name
+    key, stem = _name_key(name), _name_key(Path(name).stem)
+    hits = _spotlight(Path(name).stem if len(Path(name).stem) >= 3 else name)
+    exact = [h for h in hits if key in (_name_key(h.name), _name_key(h.stem))
+             or stem == _name_key(h.stem)]
+    if len(exact) == 1:
+        return exact[0], []
+    if len(hits) == 1:
+        return hits[0], []
+    candidates = [str(h) for h in (exact or hits)[:8]]
+    if not candidates:
+        home = Path.home()
+        candidates = [str(home / d / s) for s in suggestions
+                      for d in ("Desktop", "Downloads", "Documents")
+                      if (home / d / s).exists()][:8]
+    return None, candidates
 
 
 def _folder_size(folder: Path, limit: int) -> int:

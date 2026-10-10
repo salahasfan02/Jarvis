@@ -15,8 +15,15 @@ from ..base import tool
 
 
 def _osascript(script: str, timeout: int = 30) -> str:
-    result = subprocess.run(["osascript", "-e", script],
-                            capture_output=True, text=True, timeout=timeout)
+    try:
+        result = subprocess.run(["osascript", "-e", script],
+                                capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        app = re.search(r'tell application "([^"]+)"', script)
+        name = app.group(1) if app else "The app"
+        return (f"Failed: {name} didn't respond within {timeout} s — nothing was done. "
+                f"macOS may be showing a dialog asking to let Jarvis control {name} "
+                "(click OK), or the app is busy. Tell the user, then try again.")
     if result.returncode != 0:
         return f"AppleScript error: {result.stderr.strip()}"
     return result.stdout.strip() or "OK"
@@ -325,11 +332,30 @@ def _email_parts(to: str, cc: str, attachments: list[str] | None
     if bad:
         return [], [], [], (f"Not an email address: {', '.join(bad)}. Find the address "
                             "(e.g. search the user's contacts or ask them) and try again.")
-    files = [Path(a).expanduser() for a in attachments or []]
-    missing = [str(f) for f in files if not f.is_file()]
-    if missing:
-        return [], [], [], f"Attachment not found: {', '.join(missing)}."
+    files, error = resolve_attachments(attachments)
+    if error:
+        return [], [], [], error
     return to_list, cc_list, files, ""
+
+
+def resolve_attachments(attachments: list[str] | str | None) -> tuple[list[Path], str]:
+    """Attachment paths OR names ("my CV", "lease.pdf", the path
+    create_word_document returned) -> files. Folders can't be attached."""
+    from .documents import find_file
+    if isinstance(attachments, str):   # models often pass one path as a plain string
+        attachments = [attachments] if attachments.strip() else []
+    files: list[Path] = []
+    for item in attachments or []:
+        p, candidates = find_file(item)
+        if p is None:
+            if candidates:
+                return [], (f"Several files could be '{item}' — ask the user which one, "
+                            "then retry with its full path:\n" + "\n".join(candidates))
+            return [], f"Attachment not found: {item}."
+        if p.is_dir():
+            return [], f"{p} is a folder — attach the files inside it instead."
+        files.append(p)
+    return files, ""
 
 
 _EMAIL_PARAMS = {
@@ -341,7 +367,10 @@ _EMAIL_PARAMS = {
                                                   "user's name (no placeholders)"},
         "cc": {"type": "string", "description": "optional, comma-separated"},
         "attachments": {"type": "array", "items": {"type": "string"},
-                        "description": "optional file paths to attach"},
+                        "description": "optional files to attach: full paths, or just the "
+                                       "names the user said (\"my CV\") — they're found "
+                                       "on the Mac. To send a new document, create it "
+                                       "first (create_word_document) and attach that path."},
     },
     "required": ["to", "subject", "body"],
 }
@@ -358,10 +387,9 @@ _EMAIL_PARAMS = {
 def draft_email(to: str, subject: str, body: str, cc: str = "",
                 attachments: list[str] | None = None) -> str:
     # Drafts may name a contact ("Mom"): Mail resolves names in the open window.
-    files = [Path(a).expanduser() for a in attachments or []]
-    missing = [str(f) for f in files if not f.is_file()]
-    if missing:
-        return f"Attachment not found: {', '.join(missing)}."
+    files, error = resolve_attachments(attachments)
+    if error:
+        return error
     out = _osascript(_mail_script(_addresses(to) or [to], subject, body,
                                   _addresses(cc), files, send=False))
     if out != "ok":

@@ -361,7 +361,7 @@ export function SettingsPage(props: {
       const res = await fetch(`${API}/stt/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: s?.voice?.whisper_model ?? "base" }),
+        body: JSON.stringify({ model: s?.voice?.whisper_model ?? "small.en" }),
       });
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
@@ -633,13 +633,14 @@ export function SettingsPage(props: {
             <Row label="Whisper model"
                  sub={sttStatus?.available
                       ? `'${sttStatus.model}' ready — recognition is fully local`
-                      : "tiny 75 MB (fastest) · base 145 MB (recommended) · small 484 MB (most accurate)"}>
+                      : "small.en 484 MB (recommended — catches the wake word reliably) · base 145 MB (faster, misses more) · small 484 MB (other languages)"}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <select value={s.voice.whisper_model ?? "base"}
+                <select value={s.voice.whisper_model ?? "small.en"}
                         onChange={(e) => props.onPatch({ voice: { whisper_model: e.target.value } })}>
-                  <option value="tiny">tiny</option>
+                  <option value="small.en">small.en (English, recommended)</option>
                   <option value="base">base</option>
-                  <option value="small">small</option>
+                  <option value="tiny">tiny</option>
+                  <option value="small">small (multilingual)</option>
                 </select>
                 {sttStatus && !sttStatus.available && (
                   <button className="btn primary" disabled={!!sttDownload && !sttDownload.startsWith("failed")}

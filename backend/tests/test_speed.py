@@ -18,6 +18,7 @@ REAL_EMBED = ollama_client.embed  # captured before conftest's per-test stub
 @pytest.fixture
 def no_players(monkeypatch):
     monkeypatch.setattr(context, "app_running", lambda name: False)
+    monkeypatch.setattr(context, "list_tabs", lambda browser=None: [])  # not the real Safari
     monkeypatch.setattr(quick, "_installed_apps", lambda: {"safari": "Safari",
                                                            "calendar": "Calendar"})
 

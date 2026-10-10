@@ -5,6 +5,7 @@ export type ChatEvent =
   | { type: "agent"; agent: { id: string; name: string } }
   | { type: "memory"; recalled: { id: string; content: string }[] }
   | { type: "token"; content: string }
+  | { type: "reset_text"; content: string }
   | { type: "tool_start"; name: string; arguments: any }
   | { type: "tool_result"; name: string; result: string; denied?: boolean }
   | { type: "confirm_request"; id: string; tool: string; arguments: any; risk: string; always_ask?: boolean }

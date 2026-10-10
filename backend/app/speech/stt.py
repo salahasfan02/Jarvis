@@ -18,7 +18,9 @@ from ..config import JARVIS_HOME, settings
 MODELS_DIR = JARVIS_HOME / "models" / "whisper"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-MODEL_SIZES = {"tiny": 75, "base": 145, "small": 484}  # approx MB
+# small.en is the default: on noisy, echoey room audio it caught the wake word
+# 25/25 with no false wakes, where base caught 22/25 and woke on "Travis".
+MODEL_SIZES = {"small.en": 484, "tiny": 75, "base": 145, "small": 484}  # approx MB
 
 _lock = threading.Lock()
 _model = None
@@ -27,8 +29,8 @@ _downloading: str | None = None
 
 
 def configured_size() -> str:
-    size = settings.get("voice.whisper_model", "base")
-    return size if size in MODEL_SIZES else "base"
+    size = settings.get("voice.whisper_model", "small.en")
+    return size if size in MODEL_SIZES else "small.en"
 
 
 def model_present(size: str | None = None) -> bool:
@@ -56,8 +58,12 @@ def _load(size: str):
     with _lock:
         if _model is None or _model_size != size:
             from faster_whisper import WhisperModel
+            # ~2/3 of the cores was fastest on Apple Silicon (all cores
+            # fight the efficiency cores and the LLM: 0.7 s vs 1.8 s per clip).
+            import os
+            threads = max(4, min(8, (os.cpu_count() or 4) * 2 // 3))
             _model = WhisperModel(size, device="cpu", compute_type="int8",
-                                  download_root=str(MODELS_DIR))
+                                  cpu_threads=threads, download_root=str(MODELS_DIR))
             _model_size = size
         return _model
 
@@ -110,9 +116,14 @@ async def transcribe(audio: bytes, hint: str = "") -> dict:
     """Transcribe an audio blob (webm/ogg/wav/m4a — PyAV decodes them all).
     `hint`: words to expect, e.g. the wake words."""
     size = configured_size()
+    lang = (settings.get("voice.language", "en-US") or "en").split("-")[0].lower()
+    if size.endswith(".en") and lang != "en" and model_present(size[:-3]):
+        size = size[:-3]   # English-only model can't do other languages
+    if not model_present(size):
+        # Never leave voice dead while a better model downloads: fall back.
+        size = next((s for s in ("small.en", "small", "base", "tiny") if model_present(s)), size)
     if not model_present(size):
         return {"error": f"whisper model '{size}' is not downloaded"}
-    lang = (settings.get("voice.language", "en-US") or "en").split("-")[0].lower()
 
     def run() -> dict:
         started = time.time()
@@ -121,7 +132,9 @@ async def transcribe(audio: bytes, hint: str = "") -> dict:
             io.BytesIO(audio),
             language=lang if lang != "auto" else None,
             beam_size=1,
-            vad_filter=True,
+            # The mic segmenter already cuts clips to speech; Whisper's own VAD
+            # on top trimmed the start of "Jarvis, open YouTube" in tests.
+            vad_filter=False,
             condition_on_previous_text=False,
             **_bias_kwargs(model, hint),
         )

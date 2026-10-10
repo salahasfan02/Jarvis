@@ -232,10 +232,82 @@ CLAIM_NUDGE = ("(You said you did that, but you didn't call any tool — so noth
                "happened. Call the tool that does it now, or tell me plainly that you can't.)")
 
 
+_FAIL_STARTS = ("error", "failed", "applescript error", "couldn't", "could not",
+                "attachment not found", "no recipient", "not an email address")
+FAILED_NOTE = ("\n\n(This step FAILED — it did not happen. Fix it and retry if you can; "
+               "otherwise tell the user plainly that it didn't work and why. Never say it "
+               "succeeded.)")
+
+
+def _failed(output: str) -> bool:
+    return output.strip().lower().startswith(_FAIL_STARTS)
+
+
 def _pretends(user_content: str, reply: str) -> bool:
     """The reply claims an action the user asked for, though no tool ran."""
     return (bool(_ASKS_ACTION.search(user_content)) and not _ASKS_ABOUT_PAST.match(user_content)
             and bool(_CLAIMS_ACTION.search(reply)))
+
+
+def text_tool_call(text: str, offered: list[tools.Tool]) -> dict | None:
+    """Local models sometimes WRITE a tool call instead of making one —
+    `CloseOperation{"name": "browser_close_tab", "arguments": {"tab_index": 2}}`,
+    or JSON inside <tool_call> tags. Nothing would happen and the user would
+    see raw JSON, so recover it as a real call. Prose that merely quotes some
+    JSON (lots of other text around it) is left alone."""
+    names = {t.name for t in offered}
+    if "{" not in text or not any(n in text for n in names):
+        return None
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            obj, end = decoder.raw_decode(text, i)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("function"), dict):
+            obj = obj["function"]
+        if not isinstance(obj, dict) or obj.get("name") not in names:
+            continue
+        args = obj.get("arguments", obj.get("parameters", {}))
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {}
+        if not isinstance(args, dict):
+            continue
+        leftover = re.sub(r"</?tool_call>|```(?:json)?", "", text[:i] + text[end:]).strip()
+        if len(leftover) > 120:
+            return None
+        return {"function": {"name": obj["name"], "arguments": args}}
+    return None
+
+
+# Long listings are shown to the user directly instead of being retyped by the
+# model: a 14B model asked to repeat 236 file names writes three and stops (and
+# would take a minute to write them all). The model gets a short excerpt.
+DISPLAY_TOOLS = {"list_directory", "search_files"}
+MODEL_LISTING_LINES = 40
+
+
+def listing_for_display(name: str, output: str) -> tuple[str, str] | None:
+    """(block shown to the user, what the model reads) — or None when the
+    output isn't a listing (an error, 'No files found.')."""
+    if name not in DISPLAY_TOOLS:
+        return None
+    lines = output.splitlines()
+    if len(lines) < 2 or not (lines[0].startswith("/") or lines[0][:4].isdigit()):
+        return None
+    block = "```listing\n" + output.strip() + "\n```\n\n"
+    shown = "\n".join(lines[:MODEL_LISTING_LINES])
+    more = len(lines) - MODEL_LISTING_LINES
+    excerpt = shown + (f"\n… and {more} more lines" if more > 0 else "")
+    note = ("\n\n(The COMPLETE list is already displayed to the user above your reply. "
+            "Do NOT retype or re-list it. Reply with one short sentence — e.g. how many "
+            "items there are or anything notable — unless they asked for something else.)")
+    return block, excerpt + note
 
 
 EMPTY_NUDGE = ("(Your last reply was empty. Either call the tool that does what I "
@@ -356,6 +428,16 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                     rounds.append(_round_timing(chunk))
                     break
 
+            if not tool_calls and schemas:
+                recovered = text_tool_call(round_text, tool_list)
+                if recovered:
+                    audit.log("text_tool_call_recovered",
+                              tool=recovered["function"]["name"], text=round_text[:200])
+                    full_response = full_response[:len(full_response) - len(round_text)]
+                    round_text = ""
+                    yield {"type": "reset_text", "content": full_response}
+                    tool_calls = [recovered]
+
             if not tool_calls:
                 if (tool_schemas and not tool_events and not claim_checked
                         and _pretends(user_content, full_response)):
@@ -392,7 +474,15 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                 out: dict = {}
                 async for event in _execute_with_permission(name, args, tool_events, out):
                     yield event
-                llm_messages.append({"role": "tool", "content": out["output"],
+                model_output = out["output"]
+                if _failed(model_output):
+                    model_output += FAILED_NOTE
+                listing = listing_for_display(name, out["output"])
+                if listing:
+                    block, model_output = listing
+                    full_response += block
+                    yield {"type": "token", "content": block}
+                llm_messages.append({"role": "tool", "content": model_output,
                                      "tool_name": name})
             round_no += 1
     except ollama_client.OllamaError as e:
@@ -509,6 +599,7 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
     tool_events: list[dict] = []
     step_summaries: list[str] = []
     transcript = ""
+    streamed = ""   # everything sent as tokens, mirrored for reset_text
 
     for index, step in enumerate(steps):
         yield {"type": "step", "index": index, "total": len(steps),
@@ -544,11 +635,22 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
                     if msg.get("content"):
                         round_text += msg["content"]
                         step_text += msg["content"]
+                        streamed += msg["content"]
                         yield {"type": "token", "content": msg["content"]}
                     for tc in msg.get("tool_calls") or []:
                         tool_calls.append(tc)
                     if chunk.get("done"):
                         break
+                if not tool_calls and use_tools:
+                    recovered = text_tool_call(round_text, tool_list)
+                    if recovered:
+                        audit.log("text_tool_call_recovered",
+                                  tool=recovered["function"]["name"], text=round_text[:200])
+                        step_text = step_text[:len(step_text) - len(round_text)]
+                        streamed = streamed[:len(streamed) - len(round_text)]
+                        round_text = ""
+                        yield {"type": "reset_text", "content": streamed}
+                        tool_calls = [recovered]
                 if not tool_calls:
                     break
                 step_messages.append({"role": "assistant", "content": round_text,

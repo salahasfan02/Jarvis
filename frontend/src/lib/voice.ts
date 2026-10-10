@@ -271,8 +271,10 @@ class MicSegmenter {
     this.stop();
     try {
       // Echo cancellation keeps Jarvis's own voice out; auto gain helps quiet speech.
+      // No browser noise suppression: it can clip the soft start of a word
+      // ("Jar-vis"), and Whisper copes with room noise better on its own.
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true },
       });
     } catch {
       return false;
@@ -330,14 +332,14 @@ class MicSegmenter {
     const rms = Math.sqrt(sum / data.length);
     // Speech = clearly above the room's own noise, with a floor so a silent
     // room doesn't turn breathing into "speech".
-    const threshold = Math.max(this.floor * 2.5, 0.0035);
+    const threshold = Math.max(this.floor * 2.5, 0.003);
     this.onLevel(Math.min(1, rms / 0.1));
 
     if (!this.inSpeech) {
       // follow the noise floor: quickly down, slowly up
       this.floor = rms < this.floor ? this.floor * 0.8 + rms * 0.2 : this.floor * 0.995 + rms * 0.005;
       this.preRoll.push(data);
-      const keep = Math.ceil(400 / this.frameMs);   // 0.4 s before speech starts
+      const keep = Math.ceil(600 / this.frameMs);   // 0.6 s before speech starts
       if (this.preRoll.length > keep) this.preRoll.shift();
       this.loudRun = rms > threshold ? this.loudRun + 1 : 0;
       if (this.loudRun >= 2) {
@@ -589,6 +591,7 @@ let ampTimer: any = null;
 
 function cleanText(text: string): string {
   return text
+    .replace(/```listing[\s\S]*?```/g, " ")   // file lists are shown, not read out
     .replace(/```[\s\S]*?```/g, " code block omitted. ")
     .replace(/[*_#`>|]/g, "")
     .slice(0, 2500);

@@ -69,6 +69,9 @@ register(Agent(
                 "reminders, calendar, clipboard, windows.",
     prompt="You are in automation mode. Use the macOS tools to act on the user's behalf. "
            "Reuse existing tabs, windows and sessions — never duplicate them. "
+           "You CAN click: to press a button or link on a web page use browser_click, "
+           "anywhere else on screen use click_on_screen — never say you can't click. "
+           "To open a document or folder on the Mac use open_file. "
            "Confirm what you did after each action.",
     tool_tags=["automation", "files", "browser", "music", "notes", "calendar"]))
 
@@ -93,16 +96,21 @@ register(Agent(
     description="Reading, summarizing, drafting, sending and replying to email and messages.",
     prompt="You are in messaging mode. You can really read and send the user's email "
            "through Apple Mail — always do it with the tools, never just describe it.\n"
-           "- Send: if the user says SEND, call send_email (they approve the exact message "
-           "first). Draft/write/prepare: call draft_email. Never send a draft-only request.\n"
+           "- Send: if the user says SEND or \"email X to someone\", call send_email (they "
+           "approve the exact message first). Draft/write/prepare an email: call "
+           "draft_email. Never send a draft-only request.\n"
            "- Read / summarize: call read_emails (unread_only for 'new' mail), then give one "
            "line per email — sender, subject, the gist — and point out anything urgent or "
            "needing a reply. Use read_email(id) for one email in full, search_emails to find "
            "mail from someone or about something.\n"
            "- Reply: find the email's id, then draft_reply, or send_reply when the user says "
            "send. Sign as the user.\n"
+           "- Attachments: pass the file name the user said (\"my CV\") or a path in "
+           "`attachments`; it is found on the Mac. If unsure which file, search_files first.\n"
+           "- New documents: to email a document that doesn't exist yet, write it with "
+           "create_word_document, then attach the path it returns.\n"
            "iMessages can only be drafted — the user presses send.",
-    tool_tags=["messaging", "email"]))
+    tool_tags=["messaging", "email", "files"]))
 
 register(Agent(
     id="planner", name="Planning Agent",
@@ -145,7 +153,9 @@ _ROUTE_EXAMPLES: dict[str, list[str]] = {
                   "did anyone text me today"],
     "automation": ["open safari", "close spotify", "create a note about the meeting",
                    "set a reminder for 6pm", "what's on my calendar",
-                   "copy this to my clipboard", "give me my daily briefing"],
+                   "copy this to my clipboard", "give me my daily briefing",
+                   "click on the sign in button", "press subscribe", "open my CV",
+                   "open the report on my desktop"],
 }
 
 _example_embeddings: dict[str, list[list[float]]] | None = None
@@ -201,7 +211,7 @@ _ROUTE_KEYWORDS: dict[str, list[str]] = {
                   "draft", "reply to", "inbox", "unread"],
     "automation": ["open", "close", "launch", "quit", "safari", "chrome", "app",
                    "note", "reminder", "calendar", "clipboard", "tab", "window",
-                   "youtube"],
+                   "youtube", "click", "press", "tap on"],
 }
 
 

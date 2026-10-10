@@ -204,6 +204,13 @@ export default function App() {
           setStreaming(streamBuf.current);
           speakStreamedSentences(false);
           break;
+        case "reset_text":
+          // The model wrote a tool call as text; the backend ran it as a real
+          // call, so drop that text from the reply.
+          streamBuf.current = e.content;
+          spokenRef.current = Math.min(spokenRef.current, e.content.length);
+          setStreaming(e.content || null);
+          break;
         case "tool_start":
           setChips((c) => [...c.filter((x) => !(x.name === e.name && x.status === "running")),
                            { name: e.name, status: "running" }]);

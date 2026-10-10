@@ -97,7 +97,9 @@ export function DashboardPage(props: {
               </div>
             ))}
             {props.reply ? (
-              <div className={`reply ${props.busy ? "cursor" : ""}`}>{props.reply}</div>
+              <div className={`reply ${props.busy ? "cursor" : ""}`}>
+                {props.reply.replace(/```listing\n([\s\S]*?)(?:```|$)/g, "$1")}
+              </div>
             ) : (
               props.busy && <div className="reply cursor" />
             )}
