@@ -124,6 +124,14 @@ Hit **⌥Space** from *any* app to summon a floating command bar — ask about w
 ### ☀️ Daily Briefing
 *"Jarvis, give me my daily briefing"* → live weather, today's calendar, and your reminders, narrated.
 
+### 📱 Text Jarvis from your phone
+Message Jarvis on **Telegram** from anywhere. It does the work on your Mac and replies in the chat:
+- *"Send me the lease PDF from my Downloads"* → finds the file and sends it to you
+- *"Research the best budget e-bikes and send me a Word doc"* → searches, writes a `.docx` with sources, sends it
+- 🎙 **Voice notes** in, voice notes back · send it files or photos to ask about · approve risky actions with one tap
+
+Two-minute setup — see [Phone setup](#-phone-setup-telegram).
+
 ---
 
 ## 🚀 Quick Start
@@ -201,6 +209,19 @@ ollama pull llava              # camera & screen vision
 
 Then open **Settings** to enable them, download the offline **Whisper** and human **Kokoro** voice models, pick your theme, and set your wake word.
 
+### 📱 Phone setup (Telegram)
+
+1. In Telegram, message **[@BotFather](https://t.me/BotFather)**, send `/newbot`, pick a name, and copy the token it gives you.
+2. In Jarvis, open **Settings → Phone (Telegram)**, paste the token, and press **Connect**.
+3. Send the `/pair 123456` code shown there to your new bot from your phone — or press **Open in Telegram** if Telegram is on your Mac. That's it.
+
+Things to know:
+- **Nothing is exposed to the internet.** Jarvis polls Telegram with outbound requests only — no port forwarding, tunnel, or public URL. Your Mac must be awake with Jarvis running (on power, enable *Prevent automatic sleeping* in System Settings → Battery/Energy).
+- **Only paired accounts get answers;** everyone else is ignored. Anything that needs permission (sending a file, reading your messages…) asks with **Allow / Deny** buttons, or reply *yes* / *no*. Dangerous tools (shell, AppleScript, deleting files) are **blocked from the phone** unless you switch them on.
+- **Privacy trade-off:** Telegram bot chats aren't end-to-end encrypted, so what you send and receive passes through Telegram's servers. The feature is off until you set it up.
+- Telegram bots can't take phone calls — voice notes are the hands-free way in (needs the Whisper model; voice replies need Kokoro). Files: up to 50 MB to your phone, 20 MB from it.
+- Word documents are saved in `~/Documents/Jarvis`; files you send Jarvis land in `~/Downloads/Jarvis`. `/new` starts a fresh conversation, `/stop` cancels.
+
 ---
 
 ## 🔧 Troubleshooting
@@ -269,7 +290,7 @@ Missing macOS permissions. Open System Settings → Privacy & Security and grant
 
 Jarvis is built to earn your trust:
 
-- **Runs 100% locally** — the only network calls are the web-search tools *you* invoke.
+- **Runs 100% locally** — the only network calls are the web-search tools *you* invoke, plus Telegram if you turn on the phone channel.
 - **Permission system** — every action has a risk level. Safe actions run instantly; anything that touches your system (shell, AppleScript, deleting files) asks first, every time.
 - **Audit log** — every tool call, confirmation, and denial is recorded.
 - **You always press send** — messages and emails are only ever *drafted*.
@@ -302,6 +323,8 @@ Modular by design — new tools, agents, models, and integrations drop in withou
 ## 🤝 Contributing
 
 PRs, ideas, and bug reports are welcome. Jarvis is designed to be extended — writing a new tool or plugin is a few lines of Python (see [`docs/architecture.md`](docs/architecture.md)).
+
+Run the backend tests (any OS, no Ollama needed): `cd backend && .venv/bin/pip install pytest && .venv/bin/python -m pytest`
 
 ## ⭐ Star it
 

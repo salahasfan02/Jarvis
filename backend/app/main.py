@@ -12,7 +12,7 @@ from .plugins import loader as plugin_loader
 
 # Importing the builtin tool modules registers their tools.
 from .tools.builtin import (  # noqa: F401
-    browser, filesystem, imessage, macos, music, system, web)
+    browser, documents, filesystem, imessage, macos, music, system, web)
 
 
 @asynccontextmanager
@@ -24,7 +24,10 @@ async def lifespan(app: FastAPI):
     if settings.get("screen_memory.enabled", False):
         from .vision import journal
         journal.start()
+    from .channels import telegram
+    await telegram.start()  # no-op unless the phone channel is set up
     yield
+    await telegram.stop()
 
 
 app = FastAPI(title="Jarvis", version="0.1.0", lifespan=lifespan)

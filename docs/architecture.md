@@ -54,7 +54,10 @@ def say_hi(name: str) -> str:
     return f"Hi {name}!"
 ```
 
-Handlers may be sync or async; return a string the model can read.
+Handlers may be sync or async; return a string the model can read. Sync
+handlers run in a worker thread so a slow one can't stall the server — a
+handler that schedules asyncio tasks or touches the event loop must be
+`async def`.
 
 ## Adding an agent
 
@@ -98,6 +101,39 @@ server WAVs through a WebAudio analyser, so the dashboard core pulses to the
 actual waveform. Add XTTS-v2 / Kokoro / a cloned voice by subclassing
 `TTSEngine` and calling `register()` — the Settings dropdown lists engines
 from `/api/tts/engines` automatically.
+
+## Remote channels: the phone (v3)
+
+`channels/telegram.py` long-polls the Telegram Bot API (outbound only — no
+webhook or tunnel) and turns each message into an ordinary `run_chat()` turn,
+so phone chats get the same agents, memory, tools and permission checks as
+the desktop. Each Telegram chat maps to one conversation (folder `Phone`).
+
+```
+Telegram ─ getUpdates ─> TelegramBot.handle()      (poll loop: fast routing only)
+   paired user? ── no ──> ignored ("/pair <code>" from Settings → Phone)
+   pending question? ───> yes/no or Allow/Deny button resolves the Future
+   else per-chat queue ─> worker: download file / transcribe voice note
+                          ─> run_chat() with channels.current = TelegramSession
+                               tool_start       -> one edited status message
+                               confirm_request  -> Allow/Deny buttons
+                               done             -> HTML reply (+ voice note)
+```
+
+- `channels.current` (a ContextVar) is set for the turn. `send_file` uses it
+  to deliver to the chat the request came from; at the desk it just reveals
+  the file in Finder.
+- Remote turns add `REMOTE_TOOL_TAGS` (`remote`, `files`, `research`) to the
+  routed agent's tools, so "find X and send it" and "research Y into a Word
+  doc" work whichever agent the router picks.
+- `_execute_with_permission` blocks `dangerous` tools on remote turns unless
+  `telegram.allow_dangerous` is on (confirmation still applies then).
+- The bot token lives in `~/.jarvis/telegram_token` (mode 600), never in
+  `settings.json`; the update offset is persisted so a restart never replays
+  a request.
+
+A new channel (e.g. Twilio voice calls) subclasses `channels.ChannelSession`
+(`name`, `allow_dangerous`, `send_file`) and drives `run_chat()` the same way.
 
 ## Roadmap hooks (already scaffolded)
 

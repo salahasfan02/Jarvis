@@ -296,7 +296,7 @@ body {
 .row:last-child { border-bottom: none; }
 .row .label { font-size: 13.5px; }
 .row .sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.row input[type="text"], .row input[type="number"], .row select, .row textarea {
+.row input[type="text"], .row input[type="password"], .row input[type="number"], .row select, .row textarea {
   background: var(--bg-3); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 7px 10px; font-size: 13px; min-width: 200px; outline: none;
   font-family: var(--font);
@@ -309,6 +309,7 @@ body {
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.danger { color: var(--danger); }
 .btn.danger:hover { border-color: var(--danger); }
+.pair-code { font-family: var(--mono); font-size: 15px; letter-spacing: 1px; background: var(--accent-soft); padding: 5px 10px; border-radius: 7px; user-select: all; white-space: nowrap; }
 
 .switch { position: relative; width: 40px; height: 23px; flex-shrink: 0; }
 .switch input { display: none; }

@@ -52,9 +52,16 @@ class Tool:
         return settings.get(f"permissions.{self.name}") == "never"
 
     async def run(self, **kwargs) -> str:
-        result = self.handler(**kwargs)
-        if inspect.isawaitable(result):
-            result = await result
+        if inspect.iscoroutinefunction(self.handler):
+            result = await self.handler(**kwargs)
+        else:
+            # Sync handlers (subprocess, AppleScript) run in a worker thread so a
+            # slow one can't freeze the event loop — the phone bot, the Stop
+            # button and the dashboard keep working, and the timeout can fire.
+            # A sync handler that needs the loop must be declared `async def`.
+            result = await asyncio.to_thread(self.handler, **kwargs)
+            if inspect.isawaitable(result):
+                result = await result
         return str(result)
 
 

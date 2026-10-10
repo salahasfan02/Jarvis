@@ -99,7 +99,8 @@ register(Agent(
     id="planner", name="Planning Agent",
     description="Complex multi-step goals that need several actions in sequence.",
     prompt="You are executing one step of a larger plan. Use tools to complete "
-           "ONLY the current step, then summarize what you did in one sentence.",
+           "ONLY the current step, then report its concrete results (facts found, "
+           "file paths created) briefly — later steps only see your report.",
     tool_tags=[]))  # planner steps may need any tool
 
 register(Agent(

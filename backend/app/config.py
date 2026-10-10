@@ -74,6 +74,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "gaps": {
         "enabled": True,                # capability-gap self-analysis
     },
+    "telegram": {                       # text Jarvis from your phone (opt-in)
+        "enabled": False,               # bot token lives in ~/.jarvis/telegram_token
+        "allowed_users": [],            # paired accounts: [{"id", "name", "username"}]
+        "allow_dangerous": False,       # shell/AppleScript/delete from the phone
+        "voice_replies": True,          # answer voice notes with a voice note
+    },
     "memory": {
         "enabled": True,
         "max_recalled": 5,
