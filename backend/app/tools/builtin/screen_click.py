@@ -19,6 +19,7 @@ import subprocess
 import time
 
 from ...automation import context
+from ...ui_bridge import screen_activity_sync
 from ..base import tool
 from .browser import _focus_tab, _js_in_tab, _osascript, _q
 
@@ -130,6 +131,11 @@ def screen_click(target: str, occurrence: int = 1, double: bool = False) -> str:
         return ("I can see the screen but macOS won't let me click yet. Ask the user to "
                 f"allow Jarvis (or the Terminal running it) in {_PERMS} → Accessibility, "
                 "then try again.")
+    with screen_activity_sync("controlling"):   # frame around the screen meanwhile
+        return _find_and_click(target, occurrence, double)
+
+
+def _find_and_click(target: str, occurrence: int, double: bool) -> str:
     try:
         hits = _find_on_screen(target)
     except Exception as e:

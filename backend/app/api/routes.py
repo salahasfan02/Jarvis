@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .. import db
+from .. import db, ui_bridge
 from ..agents.registry import AGENTS
 from ..chat import service as chat_service
 from ..config import settings
@@ -541,6 +541,14 @@ def telegram_unpair(user_id: int):
     return telegram.unpair(user_id)
 
 
+# --- screen activity frame -------------------------------------------------------
+
+@router.get("/screen/activity")
+async def screen_activity():
+    """Polled by the desktop app to draw a frame while Jarvis reads/controls the screen."""
+    return ui_bridge.current()
+
+
 # --- live camera vision ----------------------------------------------------------
 
 @router.post("/vision/ask")
@@ -815,6 +823,14 @@ async def ws_chat(ws: WebSocket):
             elif mtype == "stop":
                 if current_task and not current_task.done():
                     current_task.cancel()
+
+            elif mtype == "hello" and msg.get("ui"):
+                ui_bridge.register(ws)   # a Jarvis window: it can take camera photos
+
+            elif mtype == "ui_response":
+                ui_bridge.resolve(msg.get("id", ""), msg.get("data"))
     except WebSocketDisconnect:
         if current_task and not current_task.done():
             current_task.cancel()
+    finally:
+        ui_bridge.unregister(ws)

@@ -39,6 +39,12 @@ _JUDGE_SCHEMA = {
 
 
 async def _capture_text() -> str:
+    from .. import ui_bridge
+    async with ui_bridge.screen_activity("reading"):
+        return await _capture_text_now()
+
+
+async def _capture_text_now() -> str:
     path = Path(tempfile.mkstemp(suffix=".png")[1])
     try:
         proc = await asyncio.create_subprocess_exec("screencapture", "-x", str(path))
@@ -59,8 +65,16 @@ def _notify(title: str, message: str) -> None:
         capture_output=True, timeout=10)
 
 
+def _sync_frame() -> None:
+    """A running watch keeps a steady frame on screen."""
+    from .. import ui_bridge
+    ui_bridge.set_watching(sum(w.status == "watching" for w in _watches.values()))
+
+
 async def _run(watch: Watch, max_minutes: int = 30) -> None:
     deadline = watch.started + max_minutes * 60
+    await asyncio.sleep(0)   # start() registers the watch first
+    _sync_frame()
     try:
         while watch.status == "watching" and time.time() < deadline:
             await asyncio.sleep(watch.interval)
@@ -95,6 +109,8 @@ async def _run(watch: Watch, max_minutes: int = 30) -> None:
     except asyncio.CancelledError:
         watch.status = "stopped"
         raise
+    finally:
+        _sync_frame()
 
 
 def start(condition: str, interval: int = 15) -> Watch:

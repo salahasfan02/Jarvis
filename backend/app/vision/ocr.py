@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from ..ui_bridge import is_overlay_text
+
 
 def _recognize(path: str) -> list[str]:
     import Quartz
@@ -36,7 +38,9 @@ def _recognize(path: str) -> list[str]:
     for observation in request.results() or []:
         candidate = observation.topCandidates_(1)
         if candidate and len(candidate) > 0:
-            lines.append(str(candidate[0].string()))
+            line = str(candidate[0].string())
+            if not is_overlay_text(line):   # Jarvis's own "reading your screen" frame
+                lines.append(line)
     return lines
 
 
@@ -63,6 +67,8 @@ def text_boxes(cg_image, target: str = "") -> list[tuple[str, tuple[float, float
             continue
         cand = candidates[0]
         text = str(cand.string())
+        if is_overlay_text(text):
+            continue
         box = observation.boundingBox()
         at = text.lower().find(want) if want else -1
         if at >= 0 and len(want) < len(text):

@@ -104,6 +104,17 @@ def safe_eval(expression: str):
     return ev(ast.parse(expression, mode="eval"))
 
 
+async def _screenshot() -> Path:
+    """Capture the screen to a temp PNG, with the "reading your screen" frame
+    shown so the user knows."""
+    from ... import ui_bridge
+    path = Path(tempfile.mkstemp(suffix=".png")[1])
+    async with ui_bridge.screen_activity("reading"):
+        proc = await asyncio.create_subprocess_exec("screencapture", "-x", str(path))
+        await proc.wait()
+    return path
+
+
 async def _describe_image(path: Path, question: str) -> str:
     """Send an image to the configured multimodal model."""
     from ...llm import ollama_client
@@ -131,9 +142,7 @@ async def _describe_image(path: Path, question: str) -> str:
     agent_tags=["vision"],
 )
 async def screen_look(question: str = "Describe what is on this screen.") -> str:
-    path = Path(tempfile.mkstemp(suffix=".png")[1])
-    proc = await asyncio.create_subprocess_exec("screencapture", "-x", str(path))
-    await proc.wait()
+    path = await _screenshot()
     if not path.exists() or path.stat().st_size == 0:
         return "Screen capture failed — check Screen Recording permission in System Settings."
     try:
@@ -154,9 +163,7 @@ async def screen_look(question: str = "Describe what is on this screen.") -> str
 )
 async def screen_read() -> str:
     from ...vision import ocr
-    path = Path(tempfile.mkstemp(suffix=".png")[1])
-    proc = await asyncio.create_subprocess_exec("screencapture", "-x", str(path))
-    await proc.wait()
+    path = await _screenshot()
     if not path.exists() or path.stat().st_size == 0:
         return "Screen capture failed — check Screen Recording permission in System Settings."
     try:
@@ -170,9 +177,10 @@ async def screen_read() -> str:
 
 @tool(
     name="camera_look",
-    description="Take a photo with the webcam and describe what the camera sees, or "
-                "answer a question about it. Requires the 'imagesnap' utility "
-                "(brew install imagesnap) and camera permission.",
+    description="Open the camera and look: switches the Jarvis app to its Camera tab, "
+                "takes a photo and describes what the camera sees, or answers a question "
+                "about it (\"what am I holding?\", \"open the camera and tell me what you "
+                "see\"). You CAN see through the camera — never say you can't.",
     parameters={
         "type": "object",
         "properties": {"question": {"type": "string",
@@ -182,17 +190,28 @@ async def screen_read() -> str:
     agent_tags=["vision"],
 )
 async def camera_look(question: str = "Describe what you see.") -> str:
+    from ... import ui_bridge
     path = Path(tempfile.mkstemp(suffix=".jpg")[1])
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "imagesnap", "-w", "1.5", str(path),
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        await proc.wait()
-    except FileNotFoundError:
-        return "Camera capture needs the 'imagesnap' utility. Install it with: brew install imagesnap"
-    if not path.exists() or path.stat().st_size == 0:
-        return "Camera capture failed — check camera permission."
-    try:
+        # The Jarvis window has camera permission (the backend usually doesn't),
+        # and the user sees the camera open in it.
+        reply = await ui_bridge.request("camera_frame", timeout=20)
+        image = (reply.get("image") or "").split(",")[-1]
+        if image:
+            path.write_bytes(base64.b64decode(image))
+        elif reply.get("error") not in (None, "no_ui"):
+            return f"Couldn't use the camera: {reply['error']}"
+        else:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "imagesnap", "-w", "1.5", str(path),
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await proc.wait()
+            except FileNotFoundError:
+                return ("Open the Jarvis app so I can use its camera (or install imagesnap: "
+                        "brew install imagesnap).")
+        if not path.exists() or path.stat().st_size == 0:
+            return "Camera capture failed — open the Jarvis app and allow camera access."
         return await _describe_image(path, question)
     finally:
         path.unlink(missing_ok=True)

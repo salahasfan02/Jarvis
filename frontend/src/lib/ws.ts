@@ -6,6 +6,7 @@ export type ChatEvent =
   | { type: "memory"; recalled: { id: string; content: string }[] }
   | { type: "token"; content: string }
   | { type: "reset_text"; content: string }
+  | { type: "ui_request"; id: string; kind: string }
   | { type: "tool_start"; name: string; arguments: any }
   | { type: "tool_result"; name: string; result: string; denied?: boolean }
   | { type: "confirm_request"; id: string; tool: string; arguments: any; risk: string; always_ask?: boolean }
@@ -27,6 +28,9 @@ export class ChatSocket {
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) return;
     this.ws = new WebSocket(WS_URL);
     this.ws.onopen = () => {
+      // Tell the backend this is a Jarvis window, so tools can ask it for
+      // things only it can do (camera photos).
+      this.ws!.send(JSON.stringify({ type: "hello", ui: true }));
       this.onStatus(true);
       for (const m of this.queue.splice(0)) this.ws!.send(m);
     };
@@ -57,5 +61,9 @@ export class ChatSocket {
 
   stop() {
     this.send({ type: "stop" });
+  }
+
+  uiResponse(id: string, data: unknown) {
+    this.send({ type: "ui_response", id, data });
   }
 }

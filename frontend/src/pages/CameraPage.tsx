@@ -2,10 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, Play, Square } from "lucide-react";
 import { API } from "../lib/api";
 import { speak } from "../lib/voice";
+import { cameraBus, deliverFrame, framesWanted } from "../lib/camera";
 
 /** Live camera vision: keeps the webcam on, and answers questions about what
  *  it sees using the configured vision model (llava). */
-export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
+export function CameraPage({ speakReplies, jarvisReply }: {
+  speakReplies: boolean;
+  jarvisReply?: string | null;   // Jarvis's answer after it looked (voice/chat request)
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [on, setOn] = useState(false);
   const [err, setErr] = useState("");
@@ -15,16 +19,20 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
   const [auto, setAuto] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const autoTimer = useRef<any>(null);
+  const [jarvisLooked, setJarvisLooked] = useState(false);
 
-  const start = async () => {
+  const start = async (): Promise<boolean> => {
     setErr("");
+    if (streamRef.current?.active) return true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
       setOn(true);
+      return true;
     } catch (e: any) {
       setErr("Couldn't open the camera — allow camera access. " + e.message);
+      return false;
     }
   };
 
@@ -36,6 +44,26 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
   };
 
   useEffect(() => () => stop(), []);
+
+  // Jarvis asked to look (voice/chat): turn the camera on, let it adjust
+  // exposure for a moment, then hand over a photo.
+  useEffect(() => {
+    const serve = async () => {
+      if (!framesWanted()) return;
+      if (!(await start())) { deliverFrame(null, "camera access was refused"); return; }
+      let frame: string | null = null;
+      for (let i = 0; i < 40 && !frame; i++) {   // up to ~4 s for the first frame
+        await new Promise((r) => setTimeout(r, 100));
+        frame = captureFrame();
+      }
+      if (frame) await new Promise((r) => setTimeout(r, 700));   // auto-exposure settles
+      setJarvisLooked(true);
+      deliverFrame(captureFrame() ?? frame, "the camera didn't produce a picture");
+    };
+    serve();
+    cameraBus.addEventListener("frame-wanted", serve);
+    return () => cameraBus.removeEventListener("frame-wanted", serve);
+  }, []);
 
   const captureFrame = (): string | null => {
     const v = videoRef.current;
@@ -114,7 +142,7 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
 
         <div style={{ display: "flex", gap: 8 }}>
           {!on ? (
-            <button className="btn primary" onClick={start}><Camera /> Turn camera on</button>
+            <button className="btn primary" onClick={() => start()}><Camera /> Turn camera on</button>
           ) : (
             <>
               <button className="btn danger" onClick={stop}>Turn off</button>
@@ -124,6 +152,13 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
             </>
           )}
         </div>
+
+        {jarvisLooked && jarvisReply && (
+          <div className="panel" style={{ fontSize: 14.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+            <div className="sub" style={{ marginBottom: 6 }}>Jarvis</div>
+            {jarvisReply}
+          </div>
+        )}
 
         {on && (
           <div className="panel">

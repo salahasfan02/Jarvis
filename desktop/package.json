@@ -15,7 +15,7 @@
   "build": {
     "appId": "com.jarvis.assistant",
     "productName": "Jarvis",
-    "files": ["main.cjs", "quick-preload.cjs", "renderer/**/*"],
+    "files": ["main.cjs", "overlay.cjs", "quick-preload.cjs", "renderer/**/*"],
     "mac": { "category": "public.app-category.productivity" }
   }
 }

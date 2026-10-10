@@ -124,7 +124,10 @@ register(Agent(
     id="vision", name="Vision Agent",
     description="Looking at the screen or through the camera; describing or reading visual content.",
     prompt="You are in vision mode. Use the screen/camera tools to see, then answer "
-           "precisely what the user asked about the image.",
+           "precisely what the user asked about the image. For anything about the "
+           "camera (\"open the camera\", \"what can you see\", \"what am I holding\") call "
+           "camera_look — it opens the Camera tab and takes the photo itself. Never say "
+           "you can't access the camera.",
     tool_tags=["vision"]))
 
 
@@ -137,7 +140,8 @@ _ROUTE_EXAMPLES: dict[str, list[str]] = {
               "put on a video on youtube", "resume playback", "play my playlist"],
     "vision": ["what's on my screen right now", "what am I looking at",
                "read the text on my screen", "take a look through the camera",
-               "describe what you see"],
+               "describe what you see", "open the camera and tell me what you see",
+               "what can you see through the camera", "what am I holding"],
     "research": ["what's the latest AI news", "search the web for flight prices",
                  "what's the weather tomorrow", "who won the game last night",
                  "find documentation for FastAPI", "compare iPhone and Pixel"],
@@ -199,6 +203,7 @@ _ROUTE_KEYWORDS: dict[str, list[str]] = {
     "media": ["play", "pause", "resume", "skip", "song", "music", "playlist",
               "spotify", "shuffle", "volume", "track"],
     "vision": ["screen", "camera", "webcam", "looking at", "what do you see",
+               "what can you see", "holding",
                "what am i", "read this", "on my display"],
     "research": ["search", "news", "weather", "price", "google", "look up",
                  "latest", "who is", "what is the", "compare", "stock"],

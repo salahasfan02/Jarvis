@@ -18,6 +18,7 @@ const fs = require("fs");
 const http = require("http");
 const os = require("os");
 const path = require("path");
+const { startScreenActivityFrame } = require("./overlay.cjs");
 
 const DEV_URL = "http://localhost:5173";
 // Packaged builds carry the UI in renderer/; dev loads Vite or the repo build.
@@ -245,6 +246,7 @@ app.whenReady().then(() => {
   createTray();
   globalShortcut.register("CommandOrControl+Shift+J", toggleFloatWindow);
   globalShortcut.register("Alt+Space", toggleQuickWindow);
+  startScreenActivityFrame();   // frame around the screen while Jarvis reads/controls it
 });
 
 app.on("window-all-closed", () => {

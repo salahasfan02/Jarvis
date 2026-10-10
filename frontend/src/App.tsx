@@ -9,6 +9,7 @@ import { Page, Sidebar } from "./components/Sidebar";
 import { API, api, Attachment, Conversation, expandSkill, Message, Skill, skillsApi } from "./lib/api";
 import { enqueueSpeech, playWakeChime, speechSupported, stopSpeaking, voiceBus, VoiceEngine, WhisperVoiceEngine } from "./lib/voice";
 import { ChatEvent, ChatSocket } from "./lib/ws";
+import { requestFrame } from "./lib/camera";
 import { CameraPage } from "./pages/CameraPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
@@ -67,8 +68,9 @@ export default function App() {
   const speakStreamedSentences = useCallback((flushAll: boolean) => {
     const st = settingsRef.current;
     if (!st?.voice?.tts_enabled) return;
-    // Jarvis only speaks on the Core screen — never in the chat/code workspace.
-    if (pageRef.current !== "core") return;
+    // Jarvis speaks on the Core screen (and the Camera tab it opened to look)
+    // — never in the chat/code workspace.
+    if (pageRef.current !== "core" && pageRef.current !== "camera") return;
     // Don't read code aloud: if we're inside an unterminated ``` fence, wait.
     const soFar = streamBuf.current;
     const fences = (soFar.match(/```/g) || []).length;
@@ -194,6 +196,18 @@ export default function App() {
           if (activeIdRef.current !== e.conversation_id) {
             setActiveId(e.conversation_id);
             refreshConversations();
+          }
+          break;
+        case "ui_request":
+          // A tool needs the window itself, e.g. "open the camera and tell me
+          // what you see": show the Camera tab and hand back a photo.
+          if (e.kind === "camera_frame") {
+            setPage("camera");
+            requestFrame().then(
+              (image) => socket.uiResponse(e.id, { image }),
+              (err: Error) => socket.uiResponse(e.id, { error: err.message }));
+          } else {
+            socket.uiResponse(e.id, { error: `unknown request ${e.kind}` });
           }
           break;
         case "agent":
@@ -336,7 +350,9 @@ export default function App() {
     if (!st?.voice?.conversation_mode || !voice) return;
     if (lastInputWasVoice.current !== true) return;  // only continue voice turns
     voiceBusIdle().then(() => {
-      if (!busyRef.current && pageRef.current === "core") voice.startListening();
+      if (!busyRef.current && (pageRef.current === "core" || pageRef.current === "camera")) {
+        voice.startListening();
+      }
     });
   };
 
@@ -664,7 +680,11 @@ export default function App() {
         )}
         {page === "projects" && <ProjectsPage onOpenConversation={openConversation} />}
         {page === "skills" && <SkillsPage />}
-        {page === "camera" && <CameraPage speakReplies={settings?.voice?.tts_enabled ?? false} />}
+        {page === "camera" && (
+          <CameraPage speakReplies={settings?.voice?.tts_enabled ?? false}
+                      jarvisReply={busy ? streaming
+                        : [...messages].reverse().find((m) => m.role === "assistant")?.content ?? null} />
+        )}
         {page === "settings" && <SettingsPage settings={settings} onPatch={patchSettings} />}
         {page === "memory" && <MemoryPage />}
         {page === "dev" && <DevPage />}
