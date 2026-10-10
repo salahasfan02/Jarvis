@@ -45,9 +45,13 @@ def get_settings():
 
 
 @router.put("/settings")
-def put_settings(body: SettingsPatch):
+async def put_settings(body: SettingsPatch):
     audit.log("settings_changed", patch=body.patch)
-    return settings.update(body.patch)
+    updated = settings.update(body.patch)
+    if "enabled" in (body.patch.get("telegram") or {}):
+        from ..channels import telegram
+        await telegram.start()  # starts or stops the bot to match
+    return updated
 
 
 # --- models ------------------------------------------------------------------
@@ -463,6 +467,38 @@ def skills_import(body: dict):
         added.append(slug)
     audit.log("skills_imported", added=len(added), skipped=len(skipped))
     return {"added": added, "skipped": skipped}
+
+
+# --- phone channel (Telegram) ---------------------------------------------------
+
+@router.get("/telegram/status")
+def telegram_status():
+    from ..channels import telegram
+    return telegram.status()
+
+
+@router.post("/telegram/token")
+async def telegram_set_token(body: dict):
+    from ..channels import telegram
+    return await telegram.set_token(str(body.get("token") or ""))
+
+
+@router.delete("/telegram/token")
+async def telegram_forget_token():
+    from ..channels import telegram
+    return await telegram.forget_token()
+
+
+@router.post("/telegram/pairing")
+def telegram_pairing():
+    from ..channels import telegram
+    return telegram.new_pairing_code()
+
+
+@router.delete("/telegram/users/{user_id}")
+def telegram_unpair(user_id: int):
+    from ..channels import telegram
+    return telegram.unpair(user_id)
 
 
 # --- live camera vision ----------------------------------------------------------

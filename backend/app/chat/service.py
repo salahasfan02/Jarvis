@@ -17,7 +17,7 @@ import datetime
 import json
 from typing import AsyncIterator
 
-from .. import db
+from .. import channels, db
 from ..agents import registry as agents
 from ..automation import context as app_context
 from ..config import settings
@@ -71,6 +71,14 @@ def _dynamic_block(memories: list[dict], ctx: dict) -> str:
     if memories:
         facts = "\n".join(f"- {m['content']}" for m in memories)
         parts.append("Relevant things you remember about the user:\n" + facts)
+    channel = channels.current.get()
+    if channel is not None:
+        parts.append(
+            f"The user is messaging you from their PHONE via {channel.name}, away "
+            "from this Mac. Keep replies short and phone-friendly. When they ask "
+            "for a file from this Mac, find it (search_files / list_directory) and "
+            "deliver it with send_file. When they ask for a document or report, "
+            "write it with create_word_document, then send_file the path it returns.")
     parts.append(
         "This block is INTERNAL background awareness. Never quote, list, or "
         "repeat it, and never volunteer these details unprompted (no announcing "
@@ -79,6 +87,15 @@ def _dynamic_block(memories: list[dict], ctx: dict) -> str:
         "see you're in Messages' or 'your music is paused — want me to resume "
         "it?'.")
     return "\n\n".join(parts)
+
+
+def _tools_for(agent: agents.Agent) -> list[tools.Tool]:
+    """The routed agent's tools, plus the remote kit on phone turns. An agent
+    with no tags already sees every tool, so it is left unfiltered."""
+    tags = agent.tool_tags
+    if tags and channels.current.get() is not None:
+        tags = [*tags, *channels.REMOTE_TOOL_TAGS]
+    return tools.registry.for_agent(tags)
 
 
 def _history_to_llm(history: list[dict]) -> list[dict]:
@@ -159,7 +176,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
             llm_messages.insert(1, {"role": "system", "content": block})
 
     use_tools = settings.get("tools.enabled", True)
-    tool_list = tools.registry.for_agent(agent.tool_tags) if use_tools else []
+    tool_list = _tools_for(agent) if use_tools else []
     tool_schemas = [t.to_ollama() for t in tool_list] or None
 
     full_response = ""
@@ -256,7 +273,7 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
                     ctx: dict, memories: list[dict]) -> AsyncIterator[dict]:
     """Multi-step autonomous execution: decompose the goal, run each step with
     tools (confirmations still flow to the user), then summarize."""
-    tool_list = tools.registry.for_agent(agent.tool_tags)
+    tool_list = _tools_for(agent)
     tool_names = ", ".join(t.name for t in tool_list)
 
     try:
@@ -285,8 +302,10 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
     for index, step in enumerate(steps):
         yield {"type": "step", "index": index, "total": len(steps),
                "title": step, "status": "running"}
-        prior = "\n".join(f"Step {i + 1} result: {s}"
-                          for i, s in enumerate(step_summaries)) or "(first step)"
+        # Later steps build on earlier ones ("write the findings into a Word
+        # doc"), so hand over real content, not a one-line teaser.
+        prior = "\n\n".join(f"Step {i + 1} result:\n{s}"
+                            for i, s in enumerate(step_summaries))[-8000:] or "(first step)"
         step_messages: list[dict] = [
             {"role": "system", "content": _static_system_prompt(agent)},
             {"role": "system", "content": _dynamic_block(memories, ctx)},
@@ -297,6 +316,10 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
         ]
         schemas = [t.to_ollama() for t in tool_list] or None
         step_text = ""
+        # The duplicate-call guard is per step: a later step may legitimately
+        # repeat an earlier call (e.g. read the screen again).
+        step_events: list[dict] = []
+        step_outputs: list[str] = []
 
         try:
             for _round in range(4):
@@ -330,15 +353,20 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
                             args = {}
                     out: dict = {}
                     async for event in _execute_with_permission(
-                            fn.get("name", ""), args, tool_events, out):
+                            fn.get("name", ""), args, step_events, out):
                         yield event
                     step_messages.append({"role": "tool", "content": out["output"],
                                           "tool_name": fn.get("name", "")})
+                    step_outputs.append(f"[{fn.get('name', '')}] {out['output'][:2500]}")
         except ollama_client.OllamaError as e:
             yield {"type": "error", "message": str(e)}
             return
+        finally:
+            tool_events.extend(step_events)
 
-        summary = step_text.strip()[-400:] or "(no output)"
+        # What later steps see: the step's own report plus what its tools
+        # returned (search results, file paths...), so facts carry forward.
+        summary = "\n".join([step_text.strip(), *step_outputs]).strip()[:6000] or "(no output)"
         step_summaries.append(summary)
         transcript += f"\n\n**Step {index + 1}: {step}**\n{step_text.strip()}"
         yield {"type": "step", "index": index, "total": len(steps),
@@ -370,9 +398,19 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
 
     t = tools.registry.get(name)
     denied = False
+    denied_label = "Denied by user"
+    channel = channels.current.get()
 
     if t is None:
         output = f"Error: unknown tool '{name}'"
+    elif t.risk == "dangerous" and channel is not None and not channel.allow_dangerous:
+        # A lost or borrowed phone must not be a remote shell. The user can
+        # opt in under Settings → Phone; confirmations still apply then.
+        denied, denied_label = True, "Blocked from phone"
+        output = (f"'{name}' is blocked when the user messages from their phone "
+                  "(they can allow dangerous tools under Settings → Phone on the "
+                  "Mac). Tell them it needs to be done at the Mac.")
+        audit.log("tool_blocked_remote", tool=name, channel=channel.name)
     elif t.needs_confirmation():
         pc = confirmations.create(name, args, t.risk)
         yield {"type": "confirm_request", "id": pc.id, "tool": name,
@@ -390,6 +428,6 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
         output = await tools.execute(name, args)
 
     yield {"type": "tool_result", "name": name,
-           "result": "Denied by user" if denied else output[:1000], "denied": denied}
+           "result": denied_label if denied else output[:1000], "denied": denied}
     tool_events.append({"name": name, "arguments": args, "result": output[:500]})
     out["output"] = output

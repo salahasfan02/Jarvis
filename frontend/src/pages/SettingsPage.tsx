@@ -23,6 +23,143 @@ function Toggle(props: { checked: boolean; onChange: (v: boolean) => void }) {
   );
 }
 
+interface PhoneStatus {
+  configured: boolean;
+  enabled: boolean;
+  running: boolean;
+  connected: boolean;
+  bot_username: string;
+  error: string;
+  pairing_code: string;
+  pairing_expires_in: number;
+  allowed_users: { id: number; name: string; username?: string }[];
+  allow_dangerous: boolean;
+  voice_replies: boolean;
+}
+
+/** Text Jarvis from your phone: connect a Telegram bot, pair accounts, set limits. */
+function PhonePanel(props: { onPatch: (patch: any) => void }) {
+  const [st, setSt] = useState<PhoneStatus | null>(null);
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const refresh = () =>
+    fetch(`${API}/telegram/status`).then((r) => r.json()).then(setSt).catch(() => {});
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 4000);  // pairing completes on the phone
+    return () => clearInterval(t);
+  }, []);
+
+  const call = async (path: string, method = "POST", body?: unknown) => {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`${API}/telegram/${path}`, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const r = await res.json();
+      if (r.token_error) setError(r.token_error);
+      setSt(r);
+      return r;
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const patch = (p: Partial<PhoneStatus>) => {
+    props.onPatch({ telegram: p });
+    setSt((s) => (s ? { ...s, ...p } : s));
+    setTimeout(refresh, 1000);
+  };
+
+  if (!st) return null;
+  const bot = st.bot_username ? `@${st.bot_username}` : "your bot";
+  const state = st.connected ? `Connected as ${bot} — message it from your phone.`
+    : st.error ? st.error
+    : st.enabled ? "Connecting to Telegram…" : "Off — Jarvis isn't reading Telegram.";
+
+  return (
+    <div className="panel">
+      <h3>Phone (Telegram)</h3>
+      <div className="sub" style={{ marginBottom: 8 }}>
+        Text or voice-message Jarvis from anywhere: “send me the PDF in my Downloads”,
+        “research flights to Lisbon and send me a Word doc”. Messages and files travel
+        through Telegram's servers; your Mac never opens a port to the internet.
+      </div>
+
+      {!st.configured ? (
+        <Row label="1. Create your bot"
+             sub="In Telegram, message @BotFather, send /newbot, choose a name, then paste the token it gives you.">
+          <div style={{ display: "flex", gap: 8 }}>
+            <input type="password" placeholder="123456789:AAH…" value={token}
+                   onChange={(e) => setToken(e.target.value)} />
+            <button className="btn primary" disabled={busy || !token.trim()}
+                    onClick={() => call("token", "POST", { token }).then((r) => r?.configured && setToken(""))}>
+              {busy ? "Checking…" : "Connect"}
+            </button>
+          </div>
+        </Row>
+      ) : (
+        <Row label="Bot" sub={state}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Toggle checked={st.enabled} onChange={(v) => patch({ enabled: v })} />
+            <button className="btn danger" disabled={busy}
+                    onClick={() => confirm("Disconnect the Telegram bot from Jarvis?") && call("token", "DELETE")}>
+              Disconnect
+            </button>
+          </div>
+        </Row>
+      )}
+      {error && <div className="sub" style={{ color: "var(--danger)", padding: "4px 0" }}>{error}</div>}
+
+      {st.configured && (
+        <>
+          <Row label={st.allowed_users.length ? "Paired accounts" : "2. Pair your phone"}
+               sub={st.pairing_code
+                 ? `Send this to ${bot} from your phone (valid ${Math.ceil(st.pairing_expires_in / 60)} min), or open the link if Telegram is on this Mac.`
+                 : "Only paired Telegram accounts can talk to Jarvis — everyone else is ignored."}>
+            {st.pairing_code ? (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span className="pair-code">/pair {st.pairing_code}</span>
+                {st.bot_username && (
+                  <a className="btn" target="_blank" rel="noreferrer"
+                     href={`https://t.me/${st.bot_username}?start=pair_${st.pairing_code}`}>
+                    Open in Telegram
+                  </a>
+                )}
+              </div>
+            ) : (
+              <button className="btn" disabled={busy} onClick={() => call("pairing")}>
+                Pair a phone
+              </button>
+            )}
+          </Row>
+          {st.allowed_users.map((u) => (
+            <Row key={u.id} label={`📱 ${u.name}`} sub={u.username ? `@${u.username}` : `Telegram id ${u.id}`}>
+              <button className="btn danger" disabled={busy}
+                      onClick={() => call(`users/${u.id}`, "DELETE")}>Remove</button>
+            </Row>
+          ))}
+          <Row label="Voice replies"
+               sub="Answer your voice notes with a voice note in Jarvis's voice (needs the Kokoro voice downloaded).">
+            <Toggle checked={st.voice_replies} onChange={(v) => patch({ voice_replies: v })} />
+          </Row>
+          <Row label="Allow dangerous tools from the phone"
+               sub="Shell commands, AppleScript, deleting files, installing skills. Off: blocked from the phone entirely. On: allowed, but still asks you every time.">
+            <Toggle checked={st.allow_dangerous} onChange={(v) => patch({ allow_dangerous: v })} />
+          </Row>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function SettingsPage(props: {
   settings: any;
   onPatch: (patch: any) => void;
@@ -388,6 +525,8 @@ export function SettingsPage(props: {
                    onChange={(e) => props.onPatch({ voice: { language: e.target.value } })} />
           </Row>
         </div>
+
+        <PhonePanel onPatch={props.onPatch} />
 
         <div className="panel">
           <h3>Memory</h3>

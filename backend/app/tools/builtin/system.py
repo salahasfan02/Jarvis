@@ -301,7 +301,7 @@ async def daily_briefing() -> str:
         except Exception:
             return ""
 
-    events = osa('''
+    events = await asyncio.to_thread(osa, '''
     set output to ""
     set today to current date
     set startOfDay to today - (time of today)
@@ -317,7 +317,7 @@ async def daily_briefing() -> str:
     return output''')
     parts.append("Today's calendar:\n" + (events or "No events today."))
 
-    reminders = osa('''
+    reminders = await asyncio.to_thread(osa, '''
     set output to ""
     tell application "Reminders"
         set rs to (every reminder whose completed is false)
@@ -350,7 +350,7 @@ async def daily_briefing() -> str:
     risk="confirm",
     agent_tags=["vision"],
 )
-def watch_screen(condition: str, interval_seconds: int = 15) -> str:
+async def watch_screen(condition: str, interval_seconds: int = 15) -> str:  # schedules a task
     from ...vision import watcher
     w = watcher.start(condition, interval_seconds)
     return (f"Watching your screen (check #{w.id}) every {w.interval}s for: "
@@ -364,7 +364,7 @@ def watch_screen(condition: str, interval_seconds: int = 15) -> str:
     parameters={"type": "object", "properties": {}},
     agent_tags=["vision"],
 )
-def stop_watching() -> str:
+async def stop_watching() -> str:  # cancels tasks (loop-only)
     from ...vision import watcher
     n = watcher.stop()
     return f"Stopped {n} screen watch(es)." if n else "No active screen watches."
@@ -413,7 +413,7 @@ async def remember_screen() -> str:
     risk="confirm",
     agent_tags=["vision"],
 )
-def start_screen_memory(interval_minutes: int = 5) -> str:
+async def start_screen_memory(interval_minutes: int = 5) -> str:  # schedules a task
     from ...vision import journal
     st = journal.start(int(max(1, interval_minutes)) * 60)
     return (f"Now watching your screen every {st['interval'] // 60} min and saving what "
@@ -426,7 +426,7 @@ def start_screen_memory(interval_minutes: int = 5) -> str:
     parameters={"type": "object", "properties": {}},
     agent_tags=["vision"],
 )
-def stop_screen_memory() -> str:
+async def stop_screen_memory() -> str:  # cancels a task (loop-only)
     from ...vision import journal
     st = journal.stop()
     return f"Stopped watching your screen. Saved {st['saved']} activity notes this session."
