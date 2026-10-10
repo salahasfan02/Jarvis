@@ -86,7 +86,7 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Browser agent** — reuses your tabs, never spams windows
 - Play **YouTube** & **Apple Music**, manage playlists
 - **Notes, Reminders, Calendar** — read and create
-- Draft **iMessage & Email** (you press send)
+- **Email** — draft it, or send it when you say *send* (you approve every email first) · draft iMessages
 
 </td>
 <td width="50%" valign="top">
@@ -113,6 +113,7 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Custom Skills** — save prompts, invoke with `/name`, import/export
 - **Self-improving** — logs what it can't do and can write its own tools
 - **Multi-model** — assign models per task, benchmark them
+- **Instant commands** — *"open YouTube"*, *"open Safari"*, *"pause"* run in well under a second, no model needed
 
 </td>
 </tr>
@@ -258,6 +259,15 @@ In dev mode it loads `http://localhost:5173`, so the Vite dev server has to be r
 </details>
 
 <details>
+<summary><b>Replies feel slow</b></summary>
+
+Simple commands (*"open YouTube"*, *"pause"*) skip the model entirely. For everything else, the local model is the cost:
+- **Settings → Task models → Utility:** pick a small model (e.g. `ollama pull qwen2.5:1.5b`). Titles and background work then stop competing with your conversation.
+- **Settings → Keep model in memory:** `-1` keeps the model loaded, so replies never wait for it to load (uses RAM while Jarvis runs).
+- **Developer → Audit** shows a timing line per message: how many tokens the model had to read and how long that took. After the first message in a conversation, that number should drop to a few hundred — that's the prompt cache working.
+</details>
+
+<details>
 <summary><b>Ctrl+C didn't stop everything</b></summary>
 
 `./start.sh` cleans up when you interrupt it from the terminal it's running in. If you launched it detached (`nohup`, `&`, or from another script), the backend and UI survive — use `./stop.sh`, which kills by port instead. Add `--all` to stop Ollama too.
@@ -293,7 +303,7 @@ Jarvis is built to earn your trust:
 - **Runs 100% locally** — the only network calls are the web-search tools *you* invoke, plus Telegram if you turn on the phone channel.
 - **Permission system** — every action has a risk level. Safe actions run instantly; anything that touches your system (shell, AppleScript, deleting files) asks first, every time.
 - **Audit log** — every tool call, confirmation, and denial is recorded.
-- **You always press send** — messages and emails are only ever *drafted*.
+- **Nothing is sent behind your back** — iMessages are only drafted; an email goes out only when you say *send* and approve that exact message (this approval can't be switched off).
 - **Sandboxed code** — generated code runs with no network and confined file access.
 
 ---

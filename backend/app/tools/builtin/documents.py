@@ -232,6 +232,13 @@ def _name_key(name: str) -> str:
     return re.sub(r"[\s\u202f\u00a0]+", " ", name.lower().replace(":", ".")).strip()
 
 
+def _mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def resolve_path(path: str) -> tuple[Path | None, list[str]]:
     """The file the model meant, or (None, close-name suggestions)."""
     p = Path(path).expanduser()
@@ -249,9 +256,13 @@ def resolve_path(path: str) -> tuple[Path | None, list[str]]:
     hits = [c for c in candidates if want in (_name_key(c.name), _name_key(c.stem))]
     if len(hits) == 1:
         return hits[0].resolve(), []
+    # Suggestions: names containing the guess (newest first), then near-misses.
+    stem = _name_key(p.stem)
+    containing = sorted((c for c in candidates if len(stem) >= 4 and stem in _name_key(c.name)),
+                        key=_mtime, reverse=True)
     names = {_name_key(c.name): c.name for c in candidates}
-    close = difflib.get_close_matches(want, list(names), n=5, cutoff=0.6)
-    return None, [names[k] for k in close]
+    close = [names[k] for k in difflib.get_close_matches(want, list(names), n=5, cutoff=0.6)]
+    return None, list(dict.fromkeys([c.name for c in containing] + close))[:5]
 
 
 def _folder_size(folder: Path, limit: int) -> int:

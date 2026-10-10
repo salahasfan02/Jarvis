@@ -5,9 +5,15 @@
 ```
 UI (React) ── WebSocket /api/ws/chat ──> chat/service.run_chat()
     1. persist user message (SQLite)
-    2. memory recall            memory/store.recall()  — embeddings or keywords
-    3. agent routing            agents/registry.route() — tiny LLM classification
+    1b. instant command?        chat/quick.match() — "open youtube", "pause":
+                                run the tool directly, canned reply, no model
+    2. memory recall  ┐ concurrently, sharing one cached embedding
+    3. agent routing  ┘ agents/registry.route() (a short reply to a question
+                        keeps the previous agent)
     4. LLM streaming            llm/ollama_client.chat_stream()  + tool schemas
+                                prompt = [static system] + history (incl. earlier
+                                tool results) + <context>…</context> on the
+                                newest user message only
     5. tool-calling loop        tools/base.execute()
          · safe tools run immediately
          · confirm/dangerous -> confirm_request event -> UI dialog -> resume
@@ -19,6 +25,12 @@ All server→client events are small JSON objects (`token`, `tool_start`,
 union type.
 
 ## Key decisions
+
+- **The prompt prefix never changes.** Ollama reuses its work for an
+  unchanged prefix, and its templates put every system message before the
+  tool schemas — so per-message facts (time, current app, memories) go on
+  the newest user message, never in a system note. Otherwise each message
+  re-reads thousands of tokens of tool schemas.
 
 - **No hardcoded models.** `settings.ollama.model` is read at call time;
   changing it in Settings affects the next message.
