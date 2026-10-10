@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Gauge } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Gauge, ImagePlus, X } from "lucide-react";
 import { API, api, OllamaModel, pullModel, statsApi } from "../lib/api";
 
 function Row(props: { label: string; sub?: string; children: React.ReactNode }) {
@@ -21,6 +21,71 @@ function Toggle(props: { checked: boolean; onChange: (v: boolean) => void }) {
              onChange={(e) => props.onChange(e.target.checked)} />
       <span />
     </label>
+  );
+}
+
+/** Upload, pick and delete background pictures (stored by the backend). */
+function BackgroundPictures(props: { current: string; dim: number; onPatch: (p: any) => void }) {
+  const [pictures, setPictures] = useState<{ name: string; url: string }[]>([]);
+  const [message, setMessage] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const root = API.replace(/\/api$/, "");
+  const refresh = () =>
+    fetch(`${API}/backgrounds`).then((r) => r.json()).then(setPictures).catch(() => {});
+  useEffect(() => { refresh(); }, []);
+
+  const use = (name: string) => props.onPatch({ ui: { background: `image:${name}` } });
+  const upload = async (file: File) => {
+    setMessage(`Uploading ${file.name}…`);
+    try {
+      const res = await fetch(`${API}/backgrounds?name=${encodeURIComponent(file.name)}`, {
+        method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" },
+      });
+      const r = await res.json();
+      if (r.error) { setMessage(r.error); return; }
+      setMessage("");
+      await refresh();
+      use(r.name);
+    } catch (e: any) {
+      setMessage(`Upload failed: ${e.message}`);
+    }
+  };
+  const remove = async (name: string) => {
+    await fetch(`${API}/backgrounds/${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => {});
+    if (props.current === `image:${name}`) props.onPatch({ ui: { background: "" } });
+    refresh();
+  };
+
+  return (
+    <>
+      <Row label="Pictures"
+           sub={message || "Upload a photo or wallpaper (JPEG, PNG, WebP, GIF or iPhone HEIC), then click one to use it."}>
+        <div className="bg-gallery">
+          {pictures.map((p) => (
+            <div key={p.name} title="Use this picture"
+                 className={`bg-thumb ${props.current === `image:${p.name}` ? "active" : ""}`}
+                 style={{ backgroundImage: `url("${root}${p.url}")` }}
+                 onClick={() => use(p.name)}>
+              <button className="bg-thumb-x" title="Delete picture"
+                      onClick={(e) => { e.stopPropagation(); remove(p.name); }}>
+                <X className="icon-sm" />
+              </button>
+            </div>
+          ))}
+          <button className="bg-thumb add" title="Upload a picture" onClick={() => fileRef.current?.click()}>
+            <ImagePlus />
+          </button>
+          <input ref={fileRef} type="file" accept="image/*,.heic,.heif" style={{ display: "none" }}
+                 onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} />
+        </div>
+      </Row>
+      {props.current.startsWith("image:") && (
+        <Row label="Dim the picture" sub="Darkens it so text stays readable">
+          <input type="range" min={0} max={0.9} step={0.05} value={props.dim}
+                 onChange={(e) => props.onPatch({ ui: { background_dim: parseFloat(e.target.value) } })} />
+        </Row>
+      )}
+    </>
   );
 }
 
@@ -166,6 +231,7 @@ export function SettingsPage(props: {
   onPatch: (patch: any) => void;
 }) {
   const s = props.settings;
+  const [choosingPicture, setChoosingPicture] = useState(false);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [pullName, setPullName] = useState("");
   const [pullStatus, setPullStatus] = useState<{ text: string; pct: number } | null>(null);
@@ -626,13 +692,16 @@ export function SettingsPage(props: {
               )}
             </div>
           </Row>
-          <Row label="Background" sub="Theme default, Matrix rain animation, or a custom color">
+          <Row label="Background" sub="Theme default, Matrix rain, world map, your own picture, or a custom color">
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <select
-                value={["matrix", "world"].includes(s.ui.background) ? s.ui.background
+                value={s.ui.background?.startsWith("image:") || choosingPicture ? "picture"
+                       : ["matrix", "world"].includes(s.ui.background) ? s.ui.background
                        : s.ui.background ? "custom" : "default"}
                 onChange={(e) => {
                   const v = e.target.value;
+                  setChoosingPicture(v === "picture");
+                  if (v === "picture") return;  // pick or upload one below
                   props.onPatch({ ui: { background:
                     v === "matrix" || v === "world" ? v
                     : v === "custom" ? "#010804" : "" } });
@@ -640,9 +709,10 @@ export function SettingsPage(props: {
                 <option value="default">Theme default</option>
                 <option value="matrix">Matrix rain</option>
                 <option value="world">World map (data streams)</option>
+                <option value="picture">Picture</option>
                 <option value="custom">Custom color</option>
               </select>
-              {s.ui.background && !["matrix", "world"].includes(s.ui.background) && (
+              {/^#/.test(s.ui.background ?? "") && (
                 <input type="color" value={s.ui.background}
                        style={{ width: 44, height: 30, padding: 0, border: "1px solid var(--border)",
                                 borderRadius: 6, background: "none", cursor: "pointer" }}
@@ -650,6 +720,10 @@ export function SettingsPage(props: {
               )}
             </div>
           </Row>
+          {(choosingPicture || s.ui.background?.startsWith("image:")) && (
+            <BackgroundPictures current={s.ui.background ?? ""} dim={s.ui.background_dim ?? 0.45}
+                                onPatch={props.onPatch} />
+          )}
           <Row label="Glass effect" sub="Translucent panels with blur">
             <Toggle checked={s.ui.glass}
                     onChange={(v) => props.onPatch({ ui: { glass: v } })} />

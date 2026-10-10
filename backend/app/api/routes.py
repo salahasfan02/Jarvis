@@ -472,6 +472,40 @@ def skills_import(body: dict):
     return {"added": added, "skipped": skipped}
 
 
+# --- background pictures ---------------------------------------------------------
+
+@router.get("/backgrounds")
+def backgrounds_list():
+    from .. import backgrounds
+    return backgrounds.list_all()
+
+
+@router.post("/backgrounds")
+async def backgrounds_upload(request: Request, name: str = "picture.jpg"):
+    from .. import backgrounds
+    result = backgrounds.save(name, await request.body())
+    if "error" not in result:
+        audit.log("background_added", name=result["name"])
+    return result
+
+
+@router.get("/backgrounds/file/{name}")
+def backgrounds_file(name: str):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    from .. import backgrounds
+    path = backgrounds.path_for(name)
+    if path is None:
+        raise HTTPException(status_code=404)
+    return FileResponse(path, headers={"Cache-Control": "max-age=31536000, immutable"})
+
+
+@router.delete("/backgrounds/{name}")
+def backgrounds_delete(name: str):
+    from .. import backgrounds
+    return backgrounds.delete(name)
+
+
 # --- phone channel (Telegram) ---------------------------------------------------
 
 @router.get("/telegram/status")

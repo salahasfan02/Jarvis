@@ -399,7 +399,9 @@ export default function App() {
   }, [settings]);
 
   const bgKind: string = settings?.ui?.background ?? "";
-  const animatedBg = bgKind === "matrix" || bgKind === "world";
+  const bgPicture = bgKind.startsWith("image:")
+    ? `${API}/backgrounds/file/${encodeURIComponent(bgKind.slice(6))}` : "";
+  const animatedBg = bgKind === "matrix" || bgKind === "world" || !!bgPicture;
 
   const patchSettings = (patch: any) => {
     setSettings((s: any) => {
@@ -484,6 +486,11 @@ export default function App() {
     <>
     {bgKind === "matrix" && <MatrixRain />}
     {bgKind === "world" && <WorldMap />}
+    {bgPicture && (
+      <div className="bg-picture" style={{ backgroundImage: `url("${bgPicture}")` }}>
+        <div className="bg-picture-dim" style={{ opacity: settings?.ui?.background_dim ?? 0.45 }} />
+      </div>
+    )}
     <div className={`app ${settings?.ui?.glass !== false ? "glass" : ""} ${animatedBg ? "matrix-bg" : ""}`}>
       <Sidebar
         conversations={conversations}
