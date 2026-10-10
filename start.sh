@@ -28,8 +28,11 @@ echo "▸ Starting backend on http://127.0.0.1:8765"
 BACKEND_PID=$!
 
 # --- 3. Frontend ---------------------------------------------------------
-if [ ! -d frontend/node_modules ]; then
-  echo "▸ First run: installing frontend packages…"
+# Install on first run, and again whenever a pull changed the dependencies
+# (npm records each install in node_modules/.package-lock.json).
+if [ ! -d frontend/node_modules ] || \
+   [ frontend/package-lock.json -nt frontend/node_modules/.package-lock.json ]; then
+  echo "▸ Installing frontend packages…"
   (cd frontend && npm install --no-audit --no-fund)
 fi
 echo "▸ Starting UI on http://localhost:5173"
