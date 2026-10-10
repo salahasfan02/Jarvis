@@ -659,3 +659,15 @@ body {
 ::-webkit-scrollbar { width: 9px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ---- icons: Lucide SVGs (ISC licence), drawn in currentColor and sized to the text ---- */
+.lucide { width: 1.15em; height: 1.15em; stroke-width: 1.75; flex-shrink: 0; vertical-align: -0.2em; }
+.btn, .mode-toggle button, .msg-actions button, .inline-icon {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+.icon-btn .lucide, .nav-icon .lucide, .quick-eye .lucide { width: 18px; height: 18px; }
+.nav button .lucide { width: 16px; height: 16px; }
+.empty-icon.lucide { width: 44px; height: 44px; stroke-width: 1.25; color: var(--text-dim); }
+.icon-ok { color: var(--ok); }
+.icon-bad { color: var(--danger); }
+.lucide.icon-sm { width: 13px; height: 13px; }

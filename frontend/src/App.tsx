@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowUp, Code, Ear, FileText, Image as ImageIcon, MessageSquare, Mic, Paperclip, Square, X,
+} from "lucide-react";
 import { ChatView, ConfirmModal, ConfirmRequest, ToolChipInfo } from "./components/ChatView";
 import { MatrixRain } from "./components/MatrixRain";
 import { WorldMap } from "./components/WorldMap";
@@ -137,9 +140,9 @@ export default function App() {
           { method: "POST", body: await file.arrayBuffer(),
             headers: { "Content-Type": "application/octet-stream" } });
         const r = await res.json();
-        setUploading(r.error ? `❌ ${r.error}` : "");
+        setUploading(r.error ? `Couldn't add ${file.name}: ${r.error}` : "");
       } catch (e: any) {
-        setUploading(`❌ ${e.message}`);
+        setUploading(`Couldn't add ${file.name}: ${e.message}`);
       }
     }
     refreshAttachments(convId);
@@ -260,7 +263,7 @@ export default function App() {
           setChips([]);
           setMessages((m) => [
             ...m,
-            { id: `err-${Date.now()}`, role: "assistant", content: `⚠️ ${e.message}`, meta: {}, created_at: Date.now() / 1000 },
+            { id: `err-${Date.now()}`, role: "assistant", content: `**Error:** ${e.message}`, meta: {}, created_at: Date.now() / 1000 },
           ]);
           break;
       }
@@ -500,9 +503,9 @@ export default function App() {
             <div className="workspace-header">
               <div className="mode-toggle">
                 <button className={mode === "chat" ? "active" : ""}
-                        onClick={() => switchMode("chat")}>💬 Chat</button>
+                        onClick={() => switchMode("chat")}><MessageSquare /> Chat</button>
                 <button className={mode === "code" ? "active" : ""}
-                        onClick={() => switchMode("code")}>⌨️ Code</button>
+                        onClick={() => switchMode("code")}><Code /> Code</button>
               </div>
               {mode === "code" && (
                 <span className="workspace-hint">
@@ -516,9 +519,9 @@ export default function App() {
                 value={conversations.find((c) => c.id === activeId)?.project_id ?? ""}
                 onChange={(e) => assignProject(e.target.value)}
               >
-                <option value="">📁 no project</option>
+                <option value="">No project</option>
                 {projects.map((p) => (
-                  <option key={p.id} value={p.id}>📁 {p.name}</option>
+                  <option key={p.id} value={p.id}>Project: {p.name}</option>
                 ))}
               </select>
             </div>
@@ -538,11 +541,11 @@ export default function App() {
               <div className="attach-row">
                 {attachments.map((a) => (
                   <span key={a.id} className="chip">
-                    {a.kind === "image" ? "🖼" : "📄"} {a.name}
+                    {a.kind === "image" ? <ImageIcon /> : <FileText />} {a.name}
                     <button className="chip-x" title="Remove"
                             onClick={() => api.deleteAttachment(a.id)
                               .then(() => refreshAttachments(activeIdRef.current))}>
-                      ✕
+                      <X className="icon-sm" />
                     </button>
                   </span>
                 ))}
@@ -553,7 +556,7 @@ export default function App() {
               <div className="composer">
                 <button className="icon-btn" title="Attach files or images"
                         onClick={() => fileInputRef.current?.click()}>
-                  📎
+                  <Paperclip />
                 </button>
                 <input ref={fileInputRef} type="file" multiple style={{ display: "none" }}
                        onChange={(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
@@ -563,7 +566,7 @@ export default function App() {
                     title="Push to talk"
                     onClick={() => voiceState === "idle" ? voice?.startListening() : voice?.stop()}
                   >
-                    🎤
+                    <Mic />
                   </button>
                 )}
                 {voiceEnabled && (
@@ -572,7 +575,7 @@ export default function App() {
                     title={`Wake word ("${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}")`}
                     onClick={() => voiceState === "waiting-wake" ? voice?.stop() : voice?.startWakeWord()}
                   >
-                    👂
+                    <Ear />
                   </button>
                 )}
                 <textarea
@@ -597,10 +600,10 @@ export default function App() {
                   }}
                 />
                 {busy ? (
-                  <button className="icon-btn" title="Stop" onClick={() => socket.stop()}>■</button>
+                  <button className="icon-btn" title="Stop" onClick={() => socket.stop()}><Square /></button>
                 ) : (
                   <button className="icon-btn primary" title="Send" disabled={!input.trim()}
-                          onClick={() => { lastInputWasVoice.current = false; send(input); }}>↑</button>
+                          onClick={() => { lastInputWasVoice.current = false; send(input); }}><ArrowUp /></button>
                 )}
               </div>
               <div className="voice-hint">

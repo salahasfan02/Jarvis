@@ -1,19 +1,23 @@
 import { useState } from "react";
+import {
+  Brain, Camera, Code, Folder, ListChecks, LucideIcon, MessagesSquare, Orbit,
+  PanelLeftClose, Settings, Sparkles, SquareTerminal, X,
+} from "lucide-react";
 import { Conversation } from "../lib/api";
 
 export type Page = "core" | "chat" | "code" | "projects" | "camera"
   | "skills" | "settings" | "memory" | "dev" | "registry";
 
-const NAV: { id: Page; icon: string; label: string }[] = [
-  { id: "core", icon: "◉", label: "Core" },
-  { id: "chat", icon: "💬", label: "Workspace" },
-  { id: "projects", icon: "📁", label: "Projects" },
-  { id: "skills", icon: "✨", label: "Skills" },
-  { id: "camera", icon: "📷", label: "Camera" },
-  { id: "memory", icon: "🧠", label: "Memory" },
-  { id: "registry", icon: "📋", label: "Capabilities" },
-  { id: "dev", icon: "🛠", label: "Developer" },
-  { id: "settings", icon: "⚙️", label: "Settings" },
+const NAV: { id: Page; icon: LucideIcon; label: string }[] = [
+  { id: "core", icon: Orbit, label: "Core" },
+  { id: "chat", icon: MessagesSquare, label: "Workspace" },
+  { id: "projects", icon: Folder, label: "Projects" },
+  { id: "skills", icon: Sparkles, label: "Skills" },
+  { id: "camera", icon: Camera, label: "Camera" },
+  { id: "memory", icon: Brain, label: "Memory" },
+  { id: "registry", icon: ListChecks, label: "Capabilities" },
+  { id: "dev", icon: SquareTerminal, label: "Developer" },
+  { id: "settings", icon: Settings, label: "Settings" },
 ];
 
 export function Sidebar(props: {
@@ -44,7 +48,7 @@ export function Sidebar(props: {
           <button key={n.id} title={n.label}
                   className={`nav-icon ${props.page === n.id ? "active" : ""}`}
                   onClick={() => props.onPage(n.id)}>
-            {n.icon}
+            <n.icon />
           </button>
         ))}
         <div style={{ flex: 1 }} />
@@ -61,7 +65,7 @@ export function Sidebar(props: {
         <div className={`orb ${props.busy ? "thinking" : ""}`} />
         Jarvis
         <button className="collapse-btn" title="Collapse" onClick={props.onToggleCollapse}>
-          ⟨
+          <PanelLeftClose />
         </button>
       </div>
 
@@ -69,7 +73,7 @@ export function Sidebar(props: {
         {NAV.map((n) => (
           <button key={n.id} className={props.page === n.id ? "active" : ""}
                   onClick={() => props.onPage(n.id)}>
-            {n.icon} {n.label}
+            <n.icon /> {n.label}
           </button>
         ))}
       </div>
@@ -92,7 +96,7 @@ export function Sidebar(props: {
             onClick={() => props.onSelect(c.id)}
           >
             <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-              {c.mode === "code" ? "⌨ " : ""}{c.title}
+              {c.mode === "code" && <Code className="icon-sm" style={{ marginRight: 5 }} />}{c.title}
             </span>
             <button
               className="del"
@@ -102,7 +106,7 @@ export function Sidebar(props: {
                 props.onDelete(c.id);
               }}
             >
-              ✕
+              <X className="icon-sm" />
             </button>
           </div>
         ))}

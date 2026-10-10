@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Camera, Play, Square } from "lucide-react";
 import { API } from "../lib/api";
 import { speak } from "../lib/voice";
 
@@ -70,12 +71,12 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
           if (!line.trim()) continue;
           const ev = JSON.parse(line);
           if (ev.token) { acc += ev.token; setAnswer(acc); }
-          if (ev.error) { setAnswer(`⚠ ${ev.error}`); }
+          if (ev.error) { setAnswer(`Error: ${ev.error}`); }
         }
       }
       if (speakReplies && acc) speak(acc);
     } catch (e: any) {
-      setAnswer(`⚠ ${e.message}`);
+      setAnswer(`Error: ${e.message}`);
     } finally {
       setBusy(false);
     }
@@ -103,7 +104,7 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
                  style={{ width: "100%", display: on ? "block" : "none", background: "#000" }} />
           {!on && (
             <div style={{ padding: 40, textAlign: "center", color: "var(--text-dim)" }}>
-              <div style={{ fontSize: 44 }}>📷</div>
+              <Camera className="empty-icon" />
               <div style={{ marginTop: 8 }}>Camera is off</div>
             </div>
           )}
@@ -113,12 +114,12 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
 
         <div style={{ display: "flex", gap: 8 }}>
           {!on ? (
-            <button className="btn primary" onClick={start}>📷 Turn camera on</button>
+            <button className="btn primary" onClick={start}><Camera /> Turn camera on</button>
           ) : (
             <>
               <button className="btn danger" onClick={stop}>Turn off</button>
               <button className={`btn ${auto ? "primary" : ""}`} onClick={() => setAuto((a) => !a)}>
-                {auto ? "⏹ Stop live commentary" : "▶ Live commentary"}
+                {auto ? <><Square /> Stop live commentary</> : <><Play /> Live commentary</>}
               </button>
             </>
           )}

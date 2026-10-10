@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { FileText } from "lucide-react";
 import { API, api } from "../lib/api";
 
 export function MemoryPage() {
@@ -26,9 +27,9 @@ export function MemoryPage() {
           { method: "POST", body: await file.arrayBuffer(),
             headers: { "Content-Type": "application/octet-stream" } });
         const r = await res.json();
-        setUploading(r.error ? `❌ ${r.error}` : "");
+        setUploading(r.error ? `Couldn't add ${file.name}: ${r.error}` : "");
       } catch (e: any) {
-        setUploading(`❌ ${e.message}`);
+        setUploading(`Couldn't add ${file.name}: ${e.message}`);
       }
     }
     refresh();
@@ -75,7 +76,7 @@ export function MemoryPage() {
           {docs.map((d) => (
             <div className="row" key={d.id}>
               <div>
-                <div className="label">📄 {d.name}</div>
+                <div className="label inline-icon"><FileText className="icon-sm" /> {d.name}</div>
                 <div className="sub">{d.chunk_count} passages · {new Date(d.created_at * 1000).toLocaleDateString()}</div>
               </div>
               <button className="btn danger"

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Download, Upload } from "lucide-react";
 import { Skill, skillsApi } from "../lib/api";
 
 /** Custom skills = saved prompt templates. Invoke in chat with /name.
@@ -34,7 +35,7 @@ export function SkillsPage() {
         const r = await skillsApi.import(items);
         setImportMsg(`Imported ${r.added.length}${r.skipped.length ? `, skipped ${r.skipped.length} duplicate(s)` : ""}.`);
       } catch (e: any) {
-        setImportMsg(`❌ ${file.name}: ${e.message}`);
+        setImportMsg(`Couldn't import ${file.name}: ${e.message}`);
       }
     }
     refresh();
@@ -62,8 +63,8 @@ export function SkillsPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <h1>Skills</h1>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn" onClick={() => fileRef.current?.click()}>⬆ Import</button>
-            <button className="btn" disabled={skills.length === 0} onClick={exportSkills}>⬇ Export</button>
+            <button className="btn" onClick={() => fileRef.current?.click()}><Upload /> Import</button>
+            <button className="btn" disabled={skills.length === 0} onClick={exportSkills}><Download /> Export</button>
             <input ref={fileRef} type="file" accept=".json,application/json" multiple
                    style={{ display: "none" }}
                    onChange={(e) => { importFiles(e.target.files); e.target.value = ""; }} />

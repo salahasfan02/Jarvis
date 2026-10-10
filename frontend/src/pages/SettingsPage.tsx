@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Gauge } from "lucide-react";
 import { API, api, OllamaModel, pullModel, statsApi } from "../lib/api";
 
 function Row(props: { label: string; sub?: string; children: React.ReactNode }) {
@@ -141,7 +142,7 @@ function PhonePanel(props: { onPatch: (patch: any) => void }) {
             )}
           </Row>
           {st.allowed_users.map((u) => (
-            <Row key={u.id} label={`📱 ${u.name}`} sub={u.username ? `@${u.username}` : `Telegram id ${u.id}`}>
+            <Row key={u.id} label={u.name} sub={u.username ? `@${u.username} on Telegram` : `Telegram id ${u.id}`}>
               <button className="btn danger" disabled={busy}
                       onClick={() => call(`users/${u.id}`, "DELETE")}>Remove</button>
             </Row>
@@ -199,7 +200,7 @@ export function SettingsPage(props: {
       setBenchResults((b) => ({
         ...b,
         [name]: r.error ? `benchmark failed: ${r.error.slice(0, 50)}`
-          : `⚡ ${r.generate_tokens_per_s} tok/s generate · ${r.prompt_tokens_per_s} tok/s prompt` +
+          : `${r.generate_tokens_per_s} tok/s generate · ${r.prompt_tokens_per_s} tok/s prompt` +
             (r.load_seconds > 0.5 ? ` · ${r.load_seconds}s load` : ""),
       }));
     } finally {
@@ -308,7 +309,7 @@ export function SettingsPage(props: {
           setPullStatus({ text: `${e.status ?? ""} ${pct ? pct + "%" : ""}`, pct });
         }
       });
-      setPullStatus({ text: "done ✓", pct: 100 });
+      setPullStatus({ text: "done", pct: 100 });
       setPullName("");
       refreshModels();
     } catch (e: any) {
@@ -394,7 +395,7 @@ export function SettingsPage(props: {
               <div style={{ display: "flex", gap: 6 }}>
                 <button className="btn" disabled={benching === m.name}
                         onClick={() => runBenchmark(m.name)}>
-                  {benching === m.name ? "Benchmarking…" : "⏱ Benchmark"}
+                  {benching === m.name ? "Benchmarking…" : <><Gauge /> Benchmark</>}
                 </button>
                 <button className="btn danger"
                         onClick={() => api.deleteModel(m.name).then(refreshModels)}>

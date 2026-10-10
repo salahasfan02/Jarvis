@@ -301,7 +301,7 @@ Jarvis is built to earn your trust:
 ## 🏗️ Tech Stack
 
 **Backend:** FastAPI · Ollama · SQLite · faster-whisper (STT) · Kokoro (TTS) · Apple Vision (OCR) · pyobjc
-**Frontend:** React · TypeScript · Vite
+**Frontend:** React · TypeScript · Vite · [Lucide](https://lucide.dev) icons (ISC)
 **Desktop:** Electron (tray, global hotkeys, floating window)
 
 Modular by design — new tools, agents, models, and integrations drop in without touching the core. See [`docs/architecture.md`](docs/architecture.md).

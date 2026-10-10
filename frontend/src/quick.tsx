@@ -2,6 +2,7 @@
  *  A minimal Spotlight-style bar: ask Jarvis anything, optionally with the
  *  current screen as context, and get a streamed text answer — no full app. */
 import { useEffect, useRef, useState } from "react";
+import { Eye } from "lucide-react";
 import ReactDOM from "react-dom/client";
 import ReactMarkdown from "react-markdown";
 import "./styles/global.css";
@@ -28,7 +29,7 @@ function Quick() {
     setBusy(true);
     setAnswer("");
     try {
-      // For the 👁 feature, capture the screen via Electron (which hides this
+      // For the "look at my screen" toggle, capture the screen via Electron (which hides this
       // panel first) so the OCR reads the app behind us, not our own bar.
       let screenText = "";
       if (seeScreen && (window as any).jarvisCaptureScreen) {
@@ -52,11 +53,11 @@ function Quick() {
           if (!line.trim()) continue;
           const ev = JSON.parse(line);
           if (ev.token) { acc += ev.token; setAnswer(acc); }
-          if (ev.error) setAnswer(`⚠ ${ev.error}`);
+          if (ev.error) setAnswer(`Error: ${ev.error}`);
         }
       }
     } catch (e: any) {
-      setAnswer(`⚠ ${e.message}`);
+      setAnswer(`Error: ${e.message}`);
     } finally {
       setBusy(false);
     }
@@ -78,7 +79,7 @@ function Quick() {
         />
         <button className={`quick-eye ${seeScreen ? "on" : ""}`}
                 title="Include what's on my screen"
-                onClick={() => setSeeScreen((v) => !v)}>👁</button>
+                onClick={() => setSeeScreen((v) => !v)}><Eye /></button>
       </div>
       {(answer || busy) && (
         <div className="quick-answer">
@@ -87,7 +88,7 @@ function Quick() {
         </div>
       )}
       {seeScreen && !answer && (
-        <div className="quick-hint">👁 on — I'll look at your screen to answer</div>
+        <div className="quick-hint inline-icon"><Eye className="icon-sm" /> on — I'll look at your screen to answer</div>
       )}
     </div>
   );

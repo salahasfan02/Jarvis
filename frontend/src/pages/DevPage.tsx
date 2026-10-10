@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Check, Timer, X } from "lucide-react";
 import { api } from "../lib/api";
 
 export function DevPage() {
@@ -39,7 +40,7 @@ export function DevPage() {
               <div className="audit-row" key={i}>
                 {new Date(e.ts * 1000).toLocaleTimeString()} <b>{e.event}</b>{" "}
                 {e.tool && <b>{e.tool}</b>}{" "}
-                {e.event === "chat_timing" ? timingSummary(e)
+                {e.event === "chat_timing" ? <><Timer className="icon-sm" /> {timingSummary(e)}</>
                   : JSON.stringify({ ...e, ts: undefined, event: undefined, tool: undefined })}
               </div>
             ))}
@@ -85,7 +86,9 @@ export function DevPage() {
             {plugins.map((p) => (
               <div className="row" key={p.path}>
                 <div>
-                  <div className="label">{p.ok ? "✓" : "✗"} {p.name}</div>
+                  <div className="label inline-icon">
+                    {p.ok ? <Check className="icon-ok" /> : <X className="icon-bad" />} {p.name}
+                  </div>
                   <div className="sub">{p.error ?? p.path}</div>
                 </div>
               </div>
@@ -101,11 +104,11 @@ export function DevPage() {
   );
 }
 
-/** "⏱ 3.2 s · first word 2.4 s · read 4,712 tokens (11.8 s) · …" — prompt
+/** "3.2 s total · first word 2.4 s · read 4,712 tokens (11.8 s) · …" — prompt
  *  tokens are the ones Ollama had to process; a small number = cache hit. */
 function timingSummary(e: any): string {
   const sec = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
-  const parts = [`⏱ ${sec(e.total_ms ?? 0)} total`, `agent ${e.agent}`];
+  const parts = [`${sec(e.total_ms ?? 0)} total`, `agent ${e.agent}`];
   if (e.first_token_ms) parts.push(`first word ${sec(e.first_token_ms)}`);
   (e.rounds ?? []).forEach((r: any, i: number) => {
     parts.push(`model call ${i + 1}: read ${r.prompt_tokens.toLocaleString()} tokens ` +

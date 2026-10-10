@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Check, Wand2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Gap, gapsApi } from "../lib/api";
@@ -104,12 +105,12 @@ export function RegistryPage({ onFixIt }: { onFixIt?: (gap: Gap) => void }) {
                   <div className="gap-actions">
                     {onFixIt && (
                       <button className="btn primary" onClick={() => onFixIt(g)}>
-                        ⚡ Fix it in Code Studio
+                        <Wand2 /> Fix it in Code Studio
                       </button>
                     )}
                     <button className="btn"
                             onClick={() => gapsApi.patch(g.id, { status: "completed" }).then(refresh)}>
-                      ✓ Mark completed
+                      <Check /> Mark completed
                     </button>
                     <button className="btn"
                             onClick={() => gapsApi.patch(g.id, { status: "dismissed" }).then(refresh)}>
@@ -135,7 +136,7 @@ export function RegistryPage({ onFixIt }: { onFixIt?: (gap: Gap) => void }) {
                   <span className="priority-badge done">done</span>
                   <span className="gap-name">{g.capability}</span>
                   <button className="btn danger" style={{ marginLeft: "auto" }}
-                          onClick={() => gapsApi.remove(g.id).then(refresh)}>✕</button>
+                          onClick={() => gapsApi.remove(g.id).then(refresh)}><X className="icon-sm" /></button>
                 </div>
               </div>
             ))}
