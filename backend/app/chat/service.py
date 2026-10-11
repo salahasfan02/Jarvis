@@ -33,6 +33,7 @@ from ..memory import store as memory_store
 from ..security import audit
 from ..security.permissions import confirmations
 from ..tools import base as tools
+from ..tools.builtin import research as research_tool
 from . import compact, prefetch, quick, toolpick
 
 SMART_WINDOW_RULES = """Smart context rules (IMPORTANT):
@@ -82,6 +83,13 @@ def _static_system_prompt(agent: agents.Agent | None = None) -> str:
         "When a tool would help, call it instead of guessing. Some tool calls "
         "require the user's confirmation; if one is denied, respect that and "
         "explain what you would have done.")
+    parts.append(
+        "You can look things up on the internet with research. Use it whenever the answer "
+        "depends on facts you aren't sure of — news, anything recent, prices, products, "
+        "people, sports, technical terms you don't know well (never guess what an acronym "
+        "means). Answer from what research returns, with [1], [2] after the facts and a "
+        "Sources list at the end. A document or report about a real topic is made with "
+        "research_report, which researches and writes it. For weather, use the weather tool.")
     parts.append(CONTEXT_RULES)
     from ..memory import profile
     me = profile.get()
@@ -118,12 +126,16 @@ def _dynamic_block(memories: list[dict], ctx: dict, this: str = "",
     elif channel is not None:
         parts.append(
             f"The user is messaging you from their PHONE via {channel.name}, away "
-            "from this Mac. Keep replies short and phone-friendly. When they ask "
-            "for a file from this Mac, find it (search_files / list_directory — "
-            "results are newest first, with dates) and deliver it with send_file; "
-            "for 'the latest/newest/last' one, just send the most recent match "
-            "instead of asking which. When they ask for a document or report, write "
-            "it with create_word_document, then send_file the path it returns.")
+            "from this Mac — they can't see its screen. Keep replies short and "
+            "phone-friendly. send_file delivers a file straight into this chat: 'send "
+            "it/that/them to me' means send_file with the file(s) just made or found. "
+            "When they ask for a file from this Mac, find it (search_files / "
+            "list_directory — results are newest first, with dates) and send_file it; "
+            "for 'the latest/newest/last' one, just send the most recent match instead "
+            "of asking which. For a document or report about a topic use research_report "
+            "(it researches and writes it); for their own content, create_word_document. "
+            "Then send_file the path it returns — don't say you sent anything until "
+            "send_file has run.")
     return "\n\n".join(parts)
 
 
@@ -274,7 +286,27 @@ _FAKE_SOURCES = re.compile(r"\baccording to (?:recent |my |the )?(?:web )?search
 _ASKS_ABOUT_PAST = re.compile(r"^\s*(did|have|has|was|were|is|are|why|when)\b", re.I)
 CLAIM_NUDGE = ("(You answered as if you had done or looked something up, but you didn't "
                "call any tool — so nothing happened and anything you 'found' is made up. "
-               "Call the tool that does it now, or tell me plainly that you can't.)")
+               "Call the tool that does it now, or tell me plainly that you can't. Don't "
+               "apologise or mention this note — the user never saw that reply.)")
+# Tools ran, but not the one that does what the reply claims ("I've sent you
+# the 3 files" after only listing them).
+_CLAIM_FAMILIES = (
+    (r"(?:sent|emailed|forwarded|texted|messaged)\b|\bhave been sent|\bhas been sent"
+     r"|should (?:be )?arriv", ("send_", "forward", "reply")),
+    (r"(?:created|made|written|wrote|saved|added)\b|\bhas been (?:created|saved|added)",
+     ("create_", "append_", "save", "move_file", "remember", "update_", "set_", "calendar_create",
+      "fill_form", "research_report")),
+    (r"drafted\b|\bhas been drafted", ("draft_",)),
+    (r"(?:scheduled|booked)\b|\bhas been scheduled", ("calendar_create", "create_")),
+    (r"(?:deleted|trashed|removed)\b|\bhas been deleted", ("trash", "delete", "forget", "remove")),
+    (r"moved\b|\bhas been moved", ("move_",)),
+)
+_CLAIMS = [(re.compile(r"\b(?:i(?:[’']ve| have)?|i just|i[’']ve just)\s+" + verbs, re.I), prefixes)
+           for verbs, prefixes in _CLAIM_FAMILIES]
+CLAIM_AFTER_TOOLS_NUDGE = (
+    "(You said you did something none of the tools you called actually did — nothing "
+    "like that has happened yet. Do it now with the right tool, or say plainly that it "
+    "isn't done. Don't apologise or mention this note — the user never saw that reply.)")
 
 
 # A reply that ends by announcing an action it never took.
@@ -290,18 +322,59 @@ _STALLS = re.compile(
     r"[^.?!]{0,40}\b(?:path|file ?name|location|email address|address|which file)\b"
     r"|\bi need (?:the |your |its )?(?:file ?(?:path|name)|path|location|email address|"
     r"address|name of the (?:file|document))\b"
-    r"|\b(?:just )?(?:give|send|tell) me (?:its|the|their) (?:location|path|name|address|email)\b",
+    r"|\b(?:just )?(?:give|send|tell) me (?:its|the|their) (?:location|path|name|address|email)\b"
+    # "Could you specify what 'this' refers to?" — when the context says what it is
+    r"|\bwhat [\"'“]?(?:this|that|it)[\"'”]? (?:refers|is referring|means) to\b"
+    r"|\b(?:specify|clarify|tell me) (?:what|which) (?:[\"'“]?(?:this|that|it)[\"'”]?|file|document)\b"
+    r"|\bprovide (?:me with )?the (?:file ?name|path|file)\b",
     re.I)
 STALL_NUDGE = ("(The user already asked for this, and the tool asks them to approve it "
                "itself — don't ask in text. The tools find files and people by name, so "
-               "call the tool now with what the user said.)")
+               "call the tool now with what the user said. Don't apologise or mention "
+               "this note.)")
 _WANTS_FILE = re.compile(r"\b(?:word (?:doc|document|file)|\.docx|docx|spreadsheet|excel|"
                         r"\.xlsx|presentation|slide ?deck|powerpoint|\.pptx)\b", re.I)
-FILE_NUDGE = ("(They asked for a FILE, not text in the chat. Create it now with the tool "
-              "(create_word_document / create_spreadsheet / create_presentation), with the "
-              "full content inside.)")
+FILE_NUDGE = ("(They asked for a FILE, not text in the chat. Create it now: research_report "
+              "for a document about a real topic (it researches and writes it), otherwise "
+              "create_word_document / create_spreadsheet / create_presentation with the full "
+              "content inside. Don't apologise or mention this note.)")
+_MAKES_FILE = ("create_", "research_report")
+SEND_NUDGE = ("(They asked you to send it to their phone. Call send_file now with the exact "
+              "path from the results above — don't describe it or link to it. Don't apologise "
+              "or mention this note.)")
+_SENDS_MESSAGE = re.compile(r"\b(?:e-?mail|mail|text|message|imessage|whatsapp|reply)\b", re.I)
 INTENT_NUDGE = ("(You said you would do that, but you didn't call the tool. Call it now — "
-                "don't describe it.)")
+                "don't describe it, don't apologise.)")
+UNFINISHED = "I didn't manage to finish that last step — ask me again and I'll retry."
+# "What is an MCP server?" answered from memory came back confidently wrong
+# ("Mod Coder Pack"). General-knowledge questions get looked up.
+_FACT_QUESTION = re.compile(
+    r"^\W*(?:(?:hey|hi|ok|okay|so|jarvis)\W+)*(?:what(?:[’']s| is| are| was| were| does| do)\b"
+    r"|who(?:[’']s| is| was| are| were| won| invented| made| owns)\b|when (?:is|was|did|does|will)\b"
+    r"|where (?:is|was|are)\b|which\b|how (?:many|much|old|tall|big|far|long|does|do|is)\b"
+    r"|why (?:is|are|does|did|do)\b|explain\b|tell me (?:about|what)\b|define\b|is it true\b"
+    r"|what happened\b)", re.I)
+_PERSONAL = re.compile(
+    r"\b(?:my|me|mine|i|i[’']m|i[’']ve|we|our|this|that|these|those|here|screen|calendar|"
+    r"e-?mails?|inbox|files?|folders?|desktop|downloads|tabs?|timers?|reminders?|notes?|"
+    r"time is it|the time|date today|today[’']s date|weather|forecast|rain|you|your)\b", re.I)
+FACT_HINT = ("This is a general-knowledge question: call research first and answer from what "
+             "it returns, with sources — not from memory, which can be wrong or out of date.")
+FACT_NUDGE = ("(Check that with research before answering — your memory can be wrong or out of "
+              "date, especially about names, acronyms and anything recent. Don't apologise or "
+              "mention this note.)")
+
+
+def _factual(text: str) -> bool:
+    return len(text) < 200 and bool(_FACT_QUESTION.search(text)) and not _PERSONAL.search(text)
+# What the model says BEFORE its tools run ("Sure, I'll create that now. Give
+# me a moment."). The result after the tools says it again, so the reply read
+# twice; each sentence of such a lead-in matches this.
+_LEAD_IN = re.compile(
+    r"^(?:sure|okay|ok|alright|certainly|of course|absolutely|got it|no problem|on it|"
+    r"right away|great)\b[^.!?]*[.!?]?$"
+    r"|\b(?:let me|let[’']s|i[’']ll|i will|i[’']m going to|i am going to|give me a "
+    r"(?:moment|second|sec)|one moment|just a moment|first,? i)\b", re.I)
 
 
 _FAIL_STARTS = ("error", "failed", "applescript error", "couldn't", "could not",
@@ -321,6 +394,91 @@ def _pretends(user_content: str, reply: str) -> bool:
         return True
     return (bool(_ASKS_ACTION.search(user_content)) and not _ASKS_ABOUT_PAST.match(user_content)
             and bool(_CLAIMS_ACTION.search(reply)))
+
+
+def _took_effect(result: str) -> bool:
+    r = result.strip()
+    refused = r.startswith("'") and any(w in r for w in ("blocked", "approval", "routines"))
+    return not (_failed(r) or refused or r.startswith(("The user DENIED", "STOP —", "Refused"))
+                or "nothing was sent" in r)
+
+
+def _unbacked_claim(reply: str, tool_events: list[dict]) -> bool:
+    """Tools ran, but the reply claims an action none of them did."""
+    done = [e["name"] for e in tool_events if _took_effect(e["result"])]
+    return any(claim.search(reply) and not any(n.startswith(prefixes) for n in done)
+               for claim, prefixes in _CLAIMS)
+
+
+def _narration(sentence: str) -> bool:
+    """'Sure, I'll send them now.' / 'I've sent you both files.' — talk about
+    the work, which the final words report anyway."""
+    s = sentence.strip()
+    return bool(_LEAD_IN.search(s) or any(c.search(s) for c, _ in _CLAIMS))
+
+
+_STRUCTURE = re.compile(r"^\s*(?:[-*•|]|\d+[.)]\s|```)", re.M)
+
+
+def _without_lead_ins(text: str, lead_ins: list[str], final: str = "") -> str:
+    """What the model said between its tool calls ("Sure, I'll send them now",
+    "I've sent you both…") loses its narration — the final round reports the
+    outcome. Prose it wrote mid-way is dropped too once a final answer
+    follows (it answered, called a tool, then answered again); a list or
+    table it showed along the way is kept."""
+    answered = len(final.strip()) >= 20
+    out = text
+    for seg in lead_ins:
+        s = seg.strip()
+        if not s or s not in out:
+            continue
+        lines = []
+        for line in s.splitlines():
+            kept = [x for x in re.split(r"(?<=[.!?…])\s+", line) if x.strip() and not _narration(x)]
+            lines.append(" ".join(kept))
+        cleaned = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+        if answered and not _STRUCTURE.search(cleaned):
+            cleaned = ""
+        out = out.replace(s, cleaned, 1)
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    return out or text
+
+
+def _drop_promise(text: str) -> str:
+    """Remove a trailing 'I'll send it to your phone now.' that never happened."""
+    sentences = re.split(r"(?<=[.!?…])\s+", text.rstrip())
+    while sentences and _ANNOUNCES.search(sentences[-1]):
+        sentences.pop()
+    return " ".join(sentences).rstrip()
+
+
+def _with_sources(reply: str, sources: list[tuple[int, str, str]]) -> str:
+    """A researched answer always ends with its sources: the cited ones (or all
+    of them), with real URLs — replacing a 'Sources' list the model wrote
+    without links."""
+    if not sources or any(url in reply for _, _, url in sources):
+        return reply
+    cut = re.search(r"\n\s*(?:\*\*|#+\s*)?(?:Sources|References)\b[^\n]*(?:\n.*)*\Z",
+                    reply, re.I)
+    if cut and "http" not in cut.group(0):
+        reply = reply[:cut.start()].rstrip()
+    cited = {int(n) for n in re.findall(r"\[(\d+)\]", reply)}
+    listed = [s for s in sources if s[0] in cited] or sources
+    seen, lines = set(), []
+    for n, title, url in listed:
+        if url not in seen:
+            seen.add(url)
+            lines.append(f"[{n}] [{title.replace('[', '(').replace(']', ')')}]({url})")
+    return reply + "\n\nSources:\n" + "\n".join(lines)
+
+
+async def _widen(tool_list: list[tools.Tool], agent: agents.Agent,
+                 text: str) -> list[tools.Tool]:
+    """Add the tools that what the model just SAID needs ("I'll send it to your
+    phone") — it may not have been offered them for the user's words."""
+    more = await toolpick.select(text, _tools_for(agent), keep=3)
+    names = {t.name for t in tool_list}
+    return tool_list + [t for t in more if t.name not in names]
 
 
 def text_tool_call(text: str, offered: list[tools.Tool]) -> dict | None:
@@ -366,14 +524,24 @@ DISPLAY_TOOLS = {"list_directory", "search_files"}
 MODEL_LISTING_LINES = 40
 
 
-def listing_for_display(name: str, output: str) -> tuple[str, str] | None:
+_WANTS_LIST = re.compile(r"\b(?:list|show|display|what(?:[’']s| is| are)\b[^?]{0,30}\b(?:on|in)\b"
+                         r"|what files|which files|contents?|all (?:the |my )?files)", re.I)
+
+
+def listing_for_display(name: str, output: str, asked: str = "list") -> tuple[str, str] | None:
     """(block shown to the user, what the model reads) — or None when the
-    output isn't a listing (an error, 'No files found.')."""
+    output isn't a listing (an error, 'No files found.'). The block is empty
+    when the user didn't ask to see a list (Jarvis listed a folder to find
+    something to send): they get the result, not 240 file names."""
     if name not in DISPLAY_TOOLS:
         return None
     lines = output.splitlines()
     if len(lines) < 2 or not (lines[0].startswith("/") or lines[0][:4].isdigit()):
         return None
+    if not _WANTS_LIST.search(asked):
+        more = len(lines) - MODEL_LISTING_LINES
+        return "", "\n".join(lines[:MODEL_LISTING_LINES]) + (
+            f"\n… and {more} more lines" if more > 0 else "")
     block = "```listing\n" + output.strip() + "\n```\n\n"
     shown = "\n".join(lines[:MODEL_LISTING_LINES])
     more = len(lines) - MODEL_LISTING_LINES
@@ -406,6 +574,8 @@ async def assemble(conversation_id: str, conv: dict, agent: agents.Agent,
         dyn += ("\n\nThe user wrote in ARABIC: write your whole reply in Arabic only (Arabic "
                 "script) — never switch to Chinese or English, except for names and "
                 "technical terms.")
+    if _factual(user_content) and settings.get("tools.enabled", True):
+        dyn += "\n\n" + FACT_HINT
     if spoken:
         dyn += ("\n\nThe user is TALKING to you and will HEAR the reply: answer in one to "
                 "three short spoken sentences — no lists, tables, headings, links or source "
@@ -453,6 +623,11 @@ async def assemble(conversation_id: str, conv: dict, agent: agents.Agent,
     if this:
         # "Summarize this" / "email this": be able to read what "this" is.
         picked += [x for n in _THIS_TOOLS if (x := tools.registry.get(n)) is not None]
+    channel = channels.current.get()
+    if (channel is not None and not getattr(channel, "auto_approve", False)
+            and (send := tools.registry.get("send_file")) is not None and send not in picked):
+        # On the phone, "…then send it to me" is the point of the request.
+        picked.append(send)
     return llm_messages, toolpick.arrange(picked)
 
 
@@ -522,6 +697,14 @@ async def run_chat(conversation_id: str, user_content: str,
     nudged = False
     claim_checked = False
     intent_nudged = False
+    announced = False             # nudged to do what it said it would do
+    promise = ""                  # ...and the words it said that in
+    lead_ins: list[str] = []      # what it said before each round of tools
+    sources: list[tuple[int, str, str]] = []   # research() results this turn
+    research_first = False        # a document about a topic was sent to research first
+    send_nudged = False           # phone: pushed to actually send what they asked for
+    attach_checked = False        # an email missing the file they asked for, sent back once
+    final_text = ""               # the last round's words (after all the tools)
     mistakes: list[str] = []      # what went wrong this turn (-> learned test cases)
 
     try:
@@ -560,6 +743,39 @@ async def run_chat(conversation_id: str, user_content: str,
                     tool_calls = [recovered]
 
             if not tool_calls:
+                final_text = round_text
+                if announced and (not round_text.strip() or _ANNOUNCES.search(round_text[-200:])):
+                    # Pushed to do what it said, and it still didn't: don't leave
+                    # "I'll send it now" standing as if it were happening.
+                    mistakes.append("announced an action and never took it")
+                    kept = _drop_promise(full_response[:len(full_response) - len(round_text)])
+                    full_response = (kept + "\n\n" if kept else "") + UNFINISHED
+                    yield {"type": "reset_text", "content": full_response}
+                    break
+                if (tool_schemas and tool_events and not claim_checked
+                        and not _ASKS_ABOUT_PAST.match(user_content)
+                        and _unbacked_claim(round_text, tool_events)):
+                    # "I've sent you the 3 files" after only listing them.
+                    claim_checked = True
+                    mistakes.append("claimed an action no tool did")
+                    audit.log("claimed_without_tool", agent=agent.id, reply=round_text[:200])
+                    tool_list = await _widen(tool_list, agent, round_text)
+                    tool_schemas = [t.to_ollama() for t in tool_list]
+                    llm_messages.append({"role": "assistant", "content": round_text})
+                    llm_messages.append({"role": "user", "content": CLAIM_AFTER_TOOLS_NUDGE})
+                    full_response = full_response[:len(full_response) - len(round_text)]
+                    yield {"type": "reset_text", "content": full_response}
+                    continue
+                if (tool_schemas and not tool_events and not claim_checked
+                        and _factual(user_content) and any(t.name == "research" for t in tool_list)):
+                    # A general-knowledge answer from memory: check it first.
+                    claim_checked = True
+                    mistakes.append("answered a factual question from memory")
+                    llm_messages.append({"role": "assistant", "content": round_text})
+                    llm_messages.append({"role": "user", "content": FACT_NUDGE})
+                    full_response = full_response[:len(full_response) - len(round_text)]
+                    yield {"type": "reset_text", "content": full_response}
+                    continue
                 if (tool_schemas and not tool_events and not claim_checked
                         and _pretends(user_content, full_response)):
                     # "I've drafted the email" with no tool call: nothing happened.
@@ -571,8 +787,8 @@ async def run_chat(conversation_id: str, user_content: str,
                     llm_messages.append({"role": "user", "content": CLAIM_NUDGE})
                     full_response = ""
                     continue
-                if (tool_schemas and not intent_nudged and not tool_events
-                        and _WANTS_FILE.search(user_content)):
+                if (tool_schemas and not intent_nudged and _WANTS_FILE.search(user_content)
+                        and not any(e["name"].startswith(_MAKES_FILE) for e in tool_events)):
                     # "Write a report as a Word document" answered with the
                     # report as chat text: the file was the point.
                     intent_nudged = True
@@ -597,11 +813,34 @@ async def run_chat(conversation_id: str, user_content: str,
                 if (tool_schemas and not intent_nudged and round_text.strip()
                         and _ANNOUNCES.search(round_text[-200:])):
                     # "Let me find your CV files now." — and then nothing. Hold
-                    # it to what it just said it would do.
-                    intent_nudged = True
+                    # it to what it just said it would do — with the tools that
+                    # needs, which may not have been offered for the user's words.
+                    intent_nudged = announced = True
+                    promise = round_text
                     mistakes.append("announced an action without taking it")
+                    tool_list = await _widen(tool_list, agent, round_text)
+                    tool_schemas = [t.to_ollama() for t in tool_list]
                     llm_messages.append({"role": "assistant", "content": round_text})
                     llm_messages.append({"role": "user", "content": INTENT_NUDGE})
+                    continue
+                channel = channels.current.get()
+                if (tool_schemas and not send_nudged and tool_events and channel is not None
+                        and not getattr(channel, "auto_approve", False)
+                        and _ASKED_TO_SEND.search(user_content)
+                        and not _SENDS_MESSAGE.search(user_content)
+                        and not any(e["name"] == "send_file" and _took_effect(e["result"])
+                                    for e in tool_events)):
+                    # "Send me the latest screenshot": found it, then showed a
+                    # made-up link instead of sending it.
+                    send_nudged = True
+                    mistakes.append("found the file but didn't send it")
+                    if (send := tools.registry.get("send_file")) and send not in tool_list:
+                        tool_list = tool_list + [send]
+                        tool_schemas = [x.to_ollama() for x in tool_list]
+                    llm_messages.append({"role": "assistant", "content": round_text})
+                    llm_messages.append({"role": "user", "content": SEND_NUDGE})
+                    full_response = full_response[:len(full_response) - len(round_text)]
+                    yield {"type": "reset_text", "content": full_response}
                     continue
                 if full_response.strip() or nudged:
                     break
@@ -614,6 +853,12 @@ async def run_chat(conversation_id: str, user_content: str,
 
             llm_messages.append({"role": "assistant", "content": round_text,
                                  "tool_calls": tool_calls})
+            lead_ins.append(round_text)
+            if announced and promise.strip() and promise in full_response:
+                # Doing what it promised: "I'll send it to your phone now" is noise.
+                full_response = full_response.replace(promise, _drop_promise(promise) + "\n\n", 1)
+                yield {"type": "reset_text", "content": full_response}
+            announced = False
 
             for tc in tool_calls:
                 fn = tc.get("function", {})
@@ -627,17 +872,52 @@ async def run_chat(conversation_id: str, user_content: str,
                     except json.JSONDecodeError:
                         args = {}
 
+                if (name in _DOC_TOOLS and not research_first and not sources
+                        and _ABOUT_TOPIC.search(user_content)
+                        and any(t.name == "research" for t in tool_list)):
+                    # Writing about a real topic from memory produced confident
+                    # nonsense ("Multiplayer Cooperative servers") with made-up
+                    # links. Gather the facts first, once.
+                    research_first = True
+                    mistakes.append("wrote a document before researching it")
+                    if (report := tools.registry.get("research_report")) and report not in tool_list:
+                        tool_list = tool_list + [report]
+                        tool_schemas = [x.to_ollama() for x in tool_list]
+                    llm_messages.append({"role": "tool", "tool_name": name, "content": RESEARCH_FIRST})
+                    continue
+                if not attach_checked and (what := _missing_attachment(user_content, name, args,
+                                                                       tool_events)):
+                    attach_checked = True
+                    mistakes.append("emailed without the file they asked for")
+                    llm_messages.append({"role": "tool", "tool_name": name, "content": (
+                        f"Not sent yet: the user asked you to email {what}, but this email has "
+                        f"no attachment. Add it — attachments: [\"{what}\"] (a name or the path "
+                        f"it was saved at; files are found automatically) — and call {name} "
+                        "again.")})
+                    continue
+                if (name == "create_word_document" and sources and isinstance(args, dict)
+                        and "http" not in str(args.get("content", ""))):
+                    # Written from research: the document carries its sources.
+                    args = {**args, "content": str(args.get("content", "")).rstrip()
+                            + "\n\n## Sources\n" + "\n".join(
+                                f"{n}. {title} — {url}" for n, title, url in sources)}
                 out: dict = {}
-                async for event in _execute_with_permission(name, args, tool_events, out):
+                async for event in _execute_with_permission(name, args, tool_events, out,
+                                                            asked=user_content):
                     yield event
                 model_output = out["output"]
                 if _failed(model_output):
                     model_output += FAILED_NOTE
-                listing = listing_for_display(name, out["output"])
+                if name == "research":
+                    known = {u for _, _, u in sources}
+                    sources += [x for x in research_tool.sources_in(model_output)
+                                if x[2] not in known]
+                listing = listing_for_display(name, out["output"], user_content)
                 if listing:
                     block, model_output = listing
-                    full_response += block
-                    yield {"type": "token", "content": block}
+                    if block:
+                        full_response += block
+                        yield {"type": "token", "content": block}
                 llm_messages.append({"role": "tool", "content": model_output,
                                      "tool_name": name})
             round_no += 1
@@ -652,6 +932,12 @@ async def run_chat(conversation_id: str, user_content: str,
     if not full_response.strip():
         full_response = EMPTY_FALLBACK
         yield {"type": "token", "content": full_response}
+    tidy = _without_lead_ins(full_response, lead_ins, final_text)
+    if not any(e["name"].startswith(_MAKES_FILE) for e in tool_events):
+        tidy = _with_sources(tidy, sources)   # a document carries its own
+    if tidy != full_response:
+        full_response = tidy
+        yield {"type": "reset_text", "content": full_response}
 
     timing = {"total_ms": round((time.perf_counter() - started) * 1000),
               "route_ms": routed_ms, "first_token_ms": first_token_ms,
@@ -855,7 +1141,11 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
         yield {"type": "step", "index": index, "total": len(steps),
                "title": step, "status": "done"}
 
-    final = f"Plan complete — {len(steps)} steps.{transcript}"
+    # The steps already streamed past; the reply itself is what came of them —
+    # not every step's narration again ("Plan complete — 3 steps. Step 1: …").
+    final = (await _plan_summary(goal, steps, step_summaries)
+             or f"Done — {len(steps)} steps.{transcript}")
+    yield {"type": "reset_text", "content": final}
     saved = db.add_message(conversation_id, "assistant", final,
                            meta={"agent": "planner", "tools": tool_events,
                                  "plan": steps})
@@ -863,8 +1153,57 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
     audit.log("plan_finished", steps=len(steps))
 
 
+PLAN_SUMMARY = ("Tell the user in one to three short sentences what was done for their "
+                "request and how it turned out — file names and where things are. Plain words: "
+                "don't list or number the steps. Only state what the notes show actually "
+                "happened; if something failed, say so.")
+
+
+async def _plan_summary(goal: str, steps: list[str], results: list[str]) -> str:
+    notes = "\n\n".join(f"{step}\n{result[:700]}" for step, result in zip(steps, results))
+    try:
+        text = await ollama_client.chat_once([
+            {"role": "system", "content": PLAN_SUMMARY},
+            {"role": "user", "content": f"Their request: {goal}\n\nWhat happened:\n{notes}"}])
+    except Exception:
+        return ""
+    return text.strip()
+
+
+_ASKED_TO_SEND = re.compile(r"\bsend\b", re.I)
+_DOC_TOOLS = ("create_word_document", "create_presentation")
+# "Email my CV to Sam" sent without the CV: an email the user asked to carry a
+# file must carry one.
+_NAMED_FILE = re.compile(
+    r"\b(?:e-?mail|send|mail|forward)\b[^.?!]*?\b(?:my|the|our)\s+(?:latest\s+|new\s+|recent\s+)?"
+    r"(?P<what>cv|resume|résumé|lease|pdf|documents?|docs?|files?|reports?|invoices?|receipts?|"
+    r"photos?|pictures?|images?|screenshots?|spreadsheets?|presentations?|contracts?|letters?)\b",
+    re.I)
+_EMAIL_IT = re.compile(r"\b(?:e-?mail|send|mail|attach)\w*\s+(?:it|them)\b", re.I)
+
+
+def _missing_attachment(user_content: str, name: str, args: dict,
+                        tool_events: list[dict]) -> str:
+    """What the user asked to email that this email doesn't attach, or ''."""
+    if name not in ("send_email", "draft_email") or not isinstance(args, dict) \
+            or args.get("attachments"):
+        return ""
+    if m := _NAMED_FILE.search(user_content):
+        return m.group("what")
+    if _EMAIL_IT.search(user_content) and any(e["name"].startswith(_MAKES_FILE)
+                                              for e in tool_events):
+        return "the file you just made"
+    return ""
+_ABOUT_TOPIC = re.compile(r"\b(?:about|on the topic of|explain(?:s|ing)?|regarding|research"
+                          r"|report on|guide (?:to|on)|overview of|history of)\b", re.I)
+RESEARCH_FIRST = ("Not created yet. This document is about a real-world topic: call "
+                  "research_report with the topic instead — it researches the web and writes "
+                  "the document with its sources, then returns the path. (If it's personal, or "
+                  "the user gave you all the content, just call create_word_document again.)")
+
+
 async def _execute_with_permission(name: str, args: dict, tool_events: list[dict],
-                                   out: dict) -> AsyncIterator[dict]:
+                                   out: dict, asked: str = "") -> AsyncIterator[dict]:
     """Yields UI events as they happen (crucially, confirm_request is yielded
     BEFORE blocking on the user's answer). Final tool output lands in out."""
     # Loop guard: weaker models sometimes re-call the same tool instead of
@@ -900,6 +1239,12 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
         denied, denied_label = True, "Not allowed in routines"
         output = (f"'{name}' controls the screen, which routines never do. Say what the "
                   "user should do instead.")
+    elif (name == "send_file" and channel is not None and _ASKED_TO_SEND.search(asked)
+          and not getattr(channel, "auto_approve", False)):
+        # They asked for it from the very phone it goes to: asking again on
+        # that phone protects nothing. (A send they didn't ask for still asks.)
+        yield {"type": "tool_start", "name": name, "arguments": args}
+        output = await tools.execute(name, args)
     elif t.needs_confirmation() and getattr(channel, "auto_approve", False):
         # A routine the user set up: nobody is there to ask. Confirm-level
         # tools (read mail, calendar, screen…) run; anything that always needs

@@ -12,9 +12,6 @@ import httpx
 
 from ..base import tool
 
-UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Jarvis/1.0"}
-
-
 def _strip_html(html: str, limit: int = 8000) -> str:
     html = re.sub(r"(?is)<(script|style|nav|footer|header|noscript).*?</\1>", " ", html)
     html = re.sub(r"(?s)<[^>]+>", " ", html)
@@ -41,23 +38,12 @@ def _strip_html(html: str, limit: int = 8000) -> str:
     agent_tags=["research"],
 )
 async def web_search(query: str, site: str = "") -> str:
+    from .research import search   # DuckDuckGo, then fallbacks if it's refusing
     if site:
         query = f"site:{site.strip()} {query}"
-    async with httpx.AsyncClient(timeout=15, headers=UA, follow_redirects=True) as client:
-        r = await client.post("https://html.duckduckgo.com/html/", data={"q": query})
-        r.raise_for_status()
-    results = []
-    pattern = re.compile(
-        r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
-        r'class="result__snippet"[^>]*>(.*?)</a>', re.S)
-    for m in pattern.finditer(r.text):
-        url, title, snippet = m.groups()
-        url = re.sub(r"^//duckduckgo\.com/l/\?uddg=([^&]+).*$",
-                     lambda mm: httpx.URL(f"http://x?u={mm.group(1)}").params["u"], url)
-        results.append(f"- {_strip_html(title, 200)}\n  {url}\n  {_strip_html(snippet, 300)}")
-        if len(results) >= 8:
-            break
-    return "\n".join(results) if results else "No results found."
+    hits = await search(query, n=8)
+    return "\n".join(f"- {h.title}\n  {h.url}\n  {h.snippet[:300]}" for h in hits) \
+        or "No results found."
 
 
 class PrivateAddress(httpx.RequestError):
@@ -95,16 +81,17 @@ async def _only_public(request: httpx.Request) -> None:
     agent_tags=["research"],
 )
 async def web_fetch(url: str) -> str:
+    from .research import read_page   # the page's main text, not its menus
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    async with httpx.AsyncClient(timeout=20, headers=UA, follow_redirects=True,
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True,
                                  event_hooks={"request": [_only_public]}) as client:
-        try:
-            r = await client.get(url)
-        except PrivateAddress as e:
-            return f"Refused: {e}. web_fetch only reads public websites."
-        r.raise_for_status()
-        ctype = r.headers.get("content-type", "")
-        if "html" not in ctype and "text" not in ctype and "json" not in ctype:
-            return f"URL returned non-text content ({ctype}); cannot read it as a page."
-    return _strip_html(r.text) or "Page had no readable text."
+        if not await asyncio.to_thread(_is_public, httpx.URL(url).host):
+            return (f"Refused: {httpx.URL(url).host} is a local or private network address. "
+                    "web_fetch only reads public websites.")
+        page = await read_page(client, url)
+    if page is None:
+        return "Couldn't read that page (it refused, isn't a web page, or didn't answer)."
+    final, title, text, date = page
+    head = f"{title}\n{final}" + (f"\nPublished: {date}" if date else "")
+    return f"{head}\n\n{text[:8000]}" if text.strip() else "Page had no readable text."

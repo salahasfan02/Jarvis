@@ -45,6 +45,41 @@ DESKTOP_RECENT = (f"{FAKE_HOME}/Desktop (6 items, newest first):\n"
                   f"2026-09-20 18:00  notes.txt\n2026-09-01 12:00  [dir] Spain")
 
 
+FACTS = [   # (words in the question, title, url, passage)
+    (("mcp", "model context"), "What is the Model Context Protocol (MCP)?",
+     "https://modelcontextprotocol.io/introduction",
+     "MCP (Model Context Protocol) is an open-source standard for connecting AI applications "
+     "to external systems: data sources, tools and workflows. An MCP server is a program that "
+     "exposes tools, data or reusable workflows to an AI application through the protocol."),
+    (("electric", "ev"), "Electric cars explained — Which?", "https://www.which.co.uk/ev",
+     "Electric cars run on batteries charged from the grid. They cost more upfront but less to "
+     "run; typical ranges are 200-300 miles and public rapid chargers add 100 miles in ~20 min."),
+    (("champions league",), "Champions League final 2026 report — UEFA", "https://www.uefa.com/final",
+     "Real Madrid won the 2026 Champions League final, beating Arsenal 2-1 in Budapest."),
+    (("bitcoin", "btc"), "Bitcoin price today — CoinDesk", "https://www.coindesk.com/price/bitcoin",
+     "Bitcoin was trading at about $98,000 on 11 October 2026, up 2% on the day."),
+    (("ai news", "latest ai", "artificial intelligence"), "AI news this week — The Verge",
+     "https://www.theverge.com/ai", "This week in AI: new open-weight models were released and "
+     "regulators in the EU published guidance on AI transparency."),
+    (("rest api", "rest"), "What is a REST API? — IBM", "https://www.ibm.com/topics/rest-apis",
+     "A REST API is an interface that uses HTTP requests to read and change resources, "
+     "identified by URLs, and is stateless: each request carries everything needed."),
+]
+
+
+def fake_research(topic: str) -> str:
+    low = topic.lower()
+    hits = [f for f in FACTS if any(w in low for w in f[0])] or [
+        ((), f"{topic} — Wikipedia", "https://en.wikipedia.org/wiki/Topic",
+         f"An overview of {topic}: what it is, how it works and recent developments.")]
+    lines = [f"Web research for: {topic} (searched 11 October 2026)"]
+    for n, (_, title, url, text) in enumerate(hits, 1):
+        lines += [f"\n[{n}] {title} — {url.split('/')[2]}", url, f"> {text}"]
+    lines.append("\nAnswer from the sources above ONLY. Put the source number right after each "
+                 "fact it supports, like [1]. Finish with a 'Sources:' list (title — URL).")
+    return "\n".join(lines)
+
+
 def fake_output(name: str, args: dict) -> str:
     """What each tool would plausibly return."""
     q = json.dumps(args).lower()
@@ -105,6 +140,20 @@ def fake_output(name: str, args: dict) -> str:
                 "3. [id 103] From: Landlord — Rent reminder (yesterday)")
     if name in ("calendar_today", "calendar_events"):
         return "Today 10:00–11:00 Standup\nToday 15:00–16:00 Dentist\nTomorrow 09:00 Gym"
+    if name == "research":
+        topic = args.get("question", "")
+        return fake_research(topic)
+    if name == "research_report":
+        slug = re.sub(r"[^a-z0-9]+", "-", (args.get("topic") or "report").lower()).strip("-")
+        return (f"Created Word document '{args.get('topic')}' (870 words) at "
+                f"{FAKE_HOME}/Documents/Jarvis/{slug}.docx. If the user wants it on their "
+                "phone, call send_file with this path. Written from 5 web sources.")
+    if name == "weather":
+        return ("Weather for London, England (local time 15:15):\nNow: 16°C, feels like 13°C, "
+                "overcast, wind 5 mph, humidity 47%.\nRain likely from about 18:00 (70% chance)."
+                "\nToday (Sun 11 Oct): 9–16°C, light rain, 70% chance of rain.\nTomorrow (Mon 12 "
+                "Oct): 14–17°C, light drizzle, 45% chance of rain.\nSource: Open-Meteo — "
+                "https://open-meteo.com")
     if name == "web_search":
         return ("1. Example result — https://example.com/a — relevant snippet about "
                 + (args.get("query") or "") + "\n2. Another — https://example.com/b — more")
@@ -175,8 +224,9 @@ def score(case: dict, calls: list[tuple[str, dict]], reply: str) -> list[str]:
         problems.append(f"reply !~ /{case['reply']}/: {reply[:120]!r}")
     if case.get("reply_not") and re.search(case["reply_not"], reply):
         problems.append(f"reply claims success: {reply[:120]!r}")
-    if case.get("max_chars") and len(reply) > case["max_chars"]:
-        problems.append(f"spoken reply too long: {len(reply)} chars > {case['max_chars']}")
+    said = re.split(r"\n\s*(?:\*\*|#+\s*)?(?:Sources|References)\b", reply)[0]   # shown, not spoken
+    if case.get("max_chars") and len(said) > case["max_chars"]:
+        problems.append(f"spoken reply too long: {len(said)} chars > {case['max_chars']}")
     if re.search(r'\{\s*"(name|function)"\s*:', reply):
         problems.append("tool call leaked into the reply as text")
     return problems
@@ -204,6 +254,8 @@ async def run_case(case: dict, verbose: bool) -> dict:
     for person in case.get("people", []):
         people.remember(**person)
     conv = db.create_conversation()["id"]
+    for m in case.get("history", []):     # earlier turns of the conversation
+        db.add_message(conv, m["role"], m["content"], meta=m.get("meta", {}))
     token = None
     if case.get("phone"):
         class Phone:

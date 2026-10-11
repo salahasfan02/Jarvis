@@ -41,15 +41,12 @@ register(Agent(
 register(Agent(
     id="research", name="Research Agent",
     description="Web research: news, facts, comparisons, weather, prices, documentation lookups.",
-    prompt="You are in research mode. Search the web and read pages BEFORE answering; "
-           "compare multiple sources for important claims. Use web_search's `site` "
-           "parameter to target github.com, stackoverflow.com, reddit.com, youtube.com "
-           "or arxiv.org when the question calls for it.\n"
-           "CITATIONS ARE MANDATORY: every factual claim gathered from the internet "
-           "must be traceable. End your answer with a 'Sources:' section listing, for "
-           "each source: title — URL — publication date if known — one-line summary. "
-           "Never invent URLs; only cite pages you actually fetched or that web_search "
-           "returned.",
+    prompt="You are in research mode. Call research BEFORE answering (depth 'deep' when "
+           "they ask you to research a topic or want a report); for weather call weather. "
+           "Answer from the sources it returns, putting [1], [2] right after the facts "
+           "they support, and end with a 'Sources:' list (number, title — URL). Never "
+           "invent facts or URLs. For links to a specific site (GitHub, Stack Overflow, "
+           "Reddit, arXiv) use web_search with `site`; to read one exact page, web_fetch.",
     tool_tags=["research"]))
 
 register(Agent(

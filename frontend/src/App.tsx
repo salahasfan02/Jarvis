@@ -109,10 +109,12 @@ export default function App() {
     // — never in the chat/code workspace.
     if (pageRef.current !== "core" && pageRef.current !== "camera") return;
     // Don't read code aloud: if we're inside an unterminated ``` fence, wait.
-    const soFar = streamBuf.current;
+    // Nor the reference list at the end of a researched answer.
+    const sourcesAt = streamBuf.current.search(/\n\s*(?:\*\*|#+\s*)?(?:Sources|References)\b\s*:?/i);
+    const soFar = sourcesAt >= 0 ? streamBuf.current.slice(0, sourcesAt) : streamBuf.current;
     const fences = (soFar.match(/```/g) || []).length;
     if (!flushAll && fences % 2 === 1) return;
-    const unspoken = streamBuf.current.slice(spokenRef.current);
+    const unspoken = soFar.slice(spokenRef.current);
     let cut = -1;
     if (flushAll) {
       cut = unspoken.length;
@@ -132,8 +134,10 @@ export default function App() {
       if (cut < 40) return;   // wait for a meaty chunk; avoids "Dr." fragments
     }
     const chunk = unspoken.slice(0, cut);
-    if (chunk.trim()) {
-      enqueueSpeech(chunk, st.voice.tts_rate, st.voice.tts_voice);
+    // Citation markers and links are for reading, not listening.
+    const said = chunk.replace(/\s?\[\d+(?:[,–-]\s?\d+)*\]/g, "").replace(/https?:\/\/\S+/g, "");
+    if (said.trim()) {
+      enqueueSpeech(said, st.voice.tts_rate, st.voice.tts_voice);
     }
     spokenRef.current += cut;
   }, []);

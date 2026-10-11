@@ -57,7 +57,7 @@ CASES = [
     {"say": "summarize my emails", "tools": ["read_emails"]},
     {"say": "find emails from Amazon", "tools": [["search_emails", "read_emails"]],
      "args": {"search_emails": {"query": "amazon"}}},
-    {"say": "write a report about electric cars as a word document", "tools": ["create_word_document"],
+    {"say": "write a report about electric cars as a word document", "tools": [["research_report", "create_word_document"]],
      "args": {"create_word_document": {"content": "(?s).{300,}"}}},
     {"say": "text John that I'm running late", "tools": ["draft_imessage"],
      "people": [{"name": "John Smith", "phone": "+44 7700 900123"}],
@@ -82,10 +82,10 @@ CASES = [
      "args": {"watch_screen": {"condition": "download"}}},
 
     # --- research ----------------------------------------------------------------------------
-    {"say": "what's the weather in London tomorrow", "tools": [["web_search", "web_fetch"]],
-     "args": {"web_search": {"query": "london"}}},
-    {"say": "what's the latest AI news", "tools": ["web_search"]},
-    {"say": "who won the champions league last season", "tools": ["web_search"]},
+    {"say": "what's the weather in London tomorrow", "tools": ["weather"],
+     "args": {"weather": {"place": "london"}}},
+    {"say": "what's the latest AI news", "tools": ["research"], "reply": "https?://"},
+    {"say": "who won the champions league last season", "tools": ["research"]},
 
     # --- music ----------------------------------------------------------------------------------
     {"say": "play some Taylor Swift on Apple Music", "tools": ["music_play"],
@@ -106,7 +106,7 @@ CASES = [
     # --- conversation: no tools -------------------------------------------------------------------
     {"say": "hey jarvis how are you", "no_tools": True},
     {"say": "thanks that's all", "no_tools": True},
-    {"say": "explain what a REST API is in two sentences", "no_tools": True},
+    {"say": "explain what a REST API is in two sentences", "reply": "(?i)http|stateless|resource"},
     {"say": "tell me a joke", "no_tools": True},
 
     # --- me profile & forms -----------------------------------------------------------------------
@@ -119,10 +119,10 @@ CASES = [
      "args": {"create_reminder": {"due": "18:00"}}, "reply": "[\u0600-\u06FF]{3,}"},
     {"say": "ما هي عاصمة فرنسا؟", "no_tools": True, "reply": "باريس",
      "reply_not": "[\u4e00-\u9fff]"},
-    {"say": "ما هو الطقس في دبي غدا؟", "tools": ["web_search"], "reply_not": "[\u4e00-\u9fff]"},
+    {"say": "ما هو الطقس في دبي غدا؟", "tools": ["weather"], "reply_not": "[\u4e00-\u9fff]"},
 
     # --- spoken: short answers you can listen to ------------------------------------------------
-    {"say": "what's the latest AI news", "spoken": True, "tools": ["web_search"], "max_chars": 450},
+    {"say": "what's the latest AI news", "spoken": True, "tools": ["research"], "max_chars": 450},
     {"say": "explain how a heat pump works", "spoken": True, "no_tools": True, "max_chars": 450},
     {"say": "what's on my calendar this week", "spoken": True, "max_chars": 450},
 
@@ -160,4 +160,33 @@ CASES = [
     {"say": "send me my CV", "phone": True, "tools": ["send_file"], "args": {"send_file": {"path": "cv"}}},
     {"say": "send me the latest screenshot from my desktop", "phone": True,
      "tools": ["send_file"], "args": {"send_file": {"path": "screenshot"}}},
+    {"say": "Send me the latest 3 files on my desktop", "phone": True,
+     "tools": ["list_directory", "send_file"], "reply_not": r"(?i)i'?ll send|let me send"},
+    {"say": "Can you write a word document about mcp servers, with deep explanation, then send it to me",
+     "phone": True, "tools": [["research_report", "create_word_document"], "send_file"],
+     "reply_not": r"(?i)master control|i'?ll send it"},
+    {"say": "Send it to me", "phone": True, "tools": ["send_file"],
+     "args": {"send_file": {"path": "mcp-servers-overview"}},
+     "history": [
+         {"role": "user", "content": "Can you write a word document about mcp servers"},
+         {"role": "assistant", "content": "I've created the Word document 'MCP Servers Overview'.",
+          "meta": {"agent": "general", "tools": [{"name": "create_word_document",
+                   "arguments": {"title": "MCP Servers Overview"},
+                   "result": "Created Word document 'MCP Servers Overview' (612 words) at "
+                             "/Users/salah/Documents/Jarvis/mcp-servers-overview.docx. If the user wants it on their phone, call "
+                             "send_file with this path."}]}}]},
+
+    # --- the internet ---------------------------------------------------------------------------
+    {"say": "what's the weather today", "tools": ["weather"], "reply": r"16|°"},
+    {"say": "do I need an umbrella tomorrow", "tools": ["weather"]},
+    {"say": "what's the weather like in Paris this weekend", "tools": ["weather"],
+     "args": {"weather": {"place": "paris"}}},
+    {"say": "What is a mcp server", "tools": ["research"],
+     "reply": r"(?i)model context protocol", "reply_not": r"(?i)master control"},
+    {"say": "do a research on MCP servers", "tools": ["research"],
+     "reply": r"https://(modelcontextprotocol\.io|mcpservers\.org)"},
+    {"say": "who won the champions league final this year", "tools": ["research"]},
+    {"say": "what's the price of bitcoin right now", "tools": ["research"]},
+    {"say": "what's the weather today", "spoken": True, "tools": ["weather"], "max_chars": 300,
+     "reply_not": r"https?://"},
 ]

@@ -351,26 +351,11 @@ def project_remember(project_name: str, note: str) -> str:
 async def daily_briefing() -> str:
     import subprocess
 
-    import httpx
     parts = [f"Now: {datetime.datetime.now().strftime('%A, %B %d %Y, %H:%M')}"]
 
-    # weather (wttr.in geolocates by IP; no API key, local-friendly)
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get("https://wttr.in/?format=j1")
-            w = r.json()
-            cur = w["current_condition"][0]
-            today = w["weather"][0]
-            area = w.get("nearest_area", [{}])[0]
-            city = area.get("areaName", [{}])[0].get("value", "your area")
-            parts.append(
-                f"Weather in {city}: {cur['weatherDesc'][0]['value']}, "
-                f"{cur['temp_C']}°C (feels {cur['FeelsLikeC']}°C). "
-                f"Today: {today['mintempC']}–{today['maxtempC']}°C, "
-                f"sunrise {today['astronomy'][0]['sunrise']}, "
-                f"sunset {today['astronomy'][0]['sunset']}.")
-    except Exception as e:
-        parts.append(f"Weather unavailable ({e}).")
+    # weather: Open-Meteo, for the user's town (or where the connection is)
+    from .weather import weather
+    parts.append(await weather(days=1))
 
     # today's calendar
     def osa(script: str) -> str:

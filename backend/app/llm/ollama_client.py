@@ -242,6 +242,21 @@ async def preload(model: str) -> None:
         r.raise_for_status()
 
 
+async def embed_many(texts: list[str]) -> list[list[float]] | None:
+    """Embed many texts in one request (not cached — for one-off passages)."""
+    model = settings.get("ollama.embedding_model", "")
+    if not model or not texts:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(f"{_host()}/api/embed", json={"model": model, "input": texts})
+            r.raise_for_status()
+            vectors = r.json().get("embeddings", [])
+            return vectors if len(vectors) == len(texts) else None
+    except httpx.HTTPError:
+        return None
+
+
 async def _embed_uncached(model: str, text: str) -> list[float] | None:
     try:
         async with httpx.AsyncClient(timeout=60) as client:

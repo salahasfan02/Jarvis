@@ -101,11 +101,17 @@ export interface ConfirmRequest {
   always_ask?: boolean;  // e.g. send_email: asked every time, never "always allow"
 }
 
+/** Sources and links open in the browser, not in place of Jarvis. */
+function BrowserLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const { node: _node, ...rest } = props as any;
+  return <a {...rest} target="_blank" rel="noreferrer" />;
+}
+
 function Bubble({ content }: { content: string }) {
   return (
     <div className="bubble">
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}
-                     components={{ pre: PreBlock }}>
+                     components={{ pre: PreBlock, a: BrowserLink }}>
         {content}
       </ReactMarkdown>
     </div>

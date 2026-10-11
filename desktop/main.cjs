@@ -297,6 +297,22 @@ function ensureOllama() {
     });
 }
 
+// Links in answers (sources, search results) open in the user's browser —
+// never inside a Jarvis window, which would replace Jarvis with the website.
+const OWN_PAGES = ["http://127.0.0.1:8765", "http://localhost:8765", DEV_URL,
+                   "http://127.0.0.1:5173", "data:"];
+app.on("web-contents-created", (_e, contents) => {
+  contents.on("will-navigate", (event, url) => {
+    if (OWN_PAGES.some((own) => url.startsWith(own))) return;
+    event.preventDefault();
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+  });
+  contents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+    return { action: "deny" };
+  });
+});
+
 // "Open Jarvis when I log in" (only meaningful for the installed app).
 ipcMain.handle("login-item", (_e, enabled) => {
   if (typeof enabled === "boolean" && app.isPackaged) {
