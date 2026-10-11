@@ -19,6 +19,7 @@ import html as html_lib
 import io
 import math
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 
@@ -159,6 +160,13 @@ def _site(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+# trafilatura parses every page with one shared lxml parser, and an lxml parser
+# used from two threads at once can corrupt memory and abort the whole backend
+# (it did, mid-research). Pages still download in parallel; they're taken
+# apart one at a time, always on this one thread.
+_PAGE_READER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="page-reader")
+
+
 def _extract(raw: bytes, ctype: str, encoding: str, url: str) -> tuple[str, str, str]:
     """(title, main text, date) of a page or PDF."""
     if "pdf" in ctype:
@@ -208,8 +216,8 @@ async def read_page(client: httpx.AsyncClient, url: str) -> tuple[str, str, str,
                 final, encoding = str(r.url), r.encoding or "utf-8"
         except (PrivateAddress, httpx.HTTPError):
             return None
-        title, text, date = await asyncio.to_thread(_extract, b"".join(chunks), ctype,
-                                                    encoding, final)
+        title, text, date = await asyncio.get_running_loop().run_in_executor(
+            _PAGE_READER, _extract, b"".join(chunks), ctype, encoding, final)
         return final, title, text, date
     return None
 

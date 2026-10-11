@@ -18,6 +18,40 @@ def run(coro):
 
 # --- research ------------------------------------------------------------------------
 
+def test_pages_are_taken_apart_one_at_a_time(monkeypatch):
+    """Two threads parsing with trafilatura's shared lxml parser can crash the
+    backend: pages download together but are parsed one by one, on one thread."""
+    import threading
+    import time
+    real, busy, most, threads = R._extract, [0], [0], set()
+    lock = threading.Lock()
+
+    def extract(*args):
+        with lock:
+            busy[0] += 1
+            most[0] = max(most[0], busy[0])
+        threads.add(threading.current_thread().name)
+        time.sleep(0.02)
+        try:
+            return real(*args)
+        finally:
+            with lock:
+                busy[0] -= 1
+
+    monkeypatch.setattr(R, "_extract", extract)
+    page = (b"<html><head><title>MCP</title></head><body><p>"
+            + b"Servers expose tools to the model. " * 20 + b"</p></body></html>")
+    transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, content=page, headers={"content-type": "text/html"}))
+
+    async def main():
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await asyncio.gather(*(R.read_page(client, f"https://example.com/{i}")
+                                          for i in range(6)))
+
+    assert all(r and r[1] == "MCP" for r in run(main()))
+    assert most[0] == 1 and len(threads) == 1
+
 def test_pages_are_split_into_passages_of_a_readable_size():
     text = "Intro line about MCP servers and what they do.\n" + ("Sentence about tools. " * 80)
     parts = R.passages(text, target=300)
