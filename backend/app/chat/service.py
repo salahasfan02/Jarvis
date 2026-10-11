@@ -1075,12 +1075,16 @@ async def _auto_title(conversation_id: str, user_content: str) -> AsyncIterator[
         return
     title = _short_title(user_content)
     if not title:
+        # With the answer too: on its own, the small model read "MCP servers"
+        # as "Minecraft Community Servers".
+        answer = next((m["content"] for m in reversed(conv_msgs) if m["role"] == "assistant"), "")
         try:
             title = await ollama_client.chat_once([
                 {"role": "user",
-                 "content": "Write a title of at most 5 words for this conversation. "
-                            "Reply with only the title, no quotes.\n\nUser: "
-                            + user_content[:500]}],
+                 "content": "Write a title of at most 5 words for this conversation. Keep "
+                            "names and abbreviations as they're written. Reply with only the "
+                            "title, no quotes.\n\nUser: " + user_content[:500]
+                            + ("\n\nAssistant: " + answer[:400] if answer else "")}],
                 model=ollama_client.model_for("utility"))
             title = title.strip().strip('"')[:60]
         except Exception:
