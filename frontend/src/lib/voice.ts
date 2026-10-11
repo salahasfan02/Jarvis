@@ -663,12 +663,42 @@ let queue: QueueItem[] = [];
 let pumping = false;
 let generation = 0;
 
+// Short phrases Jarvis says a lot ("One moment.") are synthesized once and
+// kept, so they play with no delay.
+const phraseCache = new Map<string, Promise<Blob | null>>();
+
 async function fetchWav(text: string): Promise<Blob | null> {
+  const cached = phraseCache.get(text);
+  if (cached) return cached;
   try {
     const { serverTts } = await import("./api");
     return await serverTts(text);
   } catch {
     return null;
+  }
+}
+
+let phraseVoice = "";
+
+/** Synthesize these now and keep them. `voiceKey` identifies the voice: the
+ *  same key again only fills in what's missing (settings reloads, React
+ *  re-runs), a new key starts over. */
+export function prewarmPhrases(phrases: string[], voiceKey = "") {
+  if (voiceKey !== phraseVoice) {
+    phraseCache.clear();
+    phraseVoice = voiceKey;
+  }
+  for (const p of phrases) {
+    const clean = cleanText(p);
+    if (phraseCache.has(clean)) continue;
+    phraseCache.set(clean, (async () => {
+      try {
+        const { serverTts } = await import("./api");
+        return await serverTts(clean);
+      } catch {
+        return null;
+      }
+    })());
   }
 }
 

@@ -1,12 +1,13 @@
 import { useState } from "react";
 import {
   AlarmClock, Brain, Camera, Code, Folder, History, ListChecks, LucideIcon, MessagesSquare, Orbit,
+  ShieldCheck,
   PanelLeftClose, Settings, Sparkles, SquareTerminal, X,
 } from "lucide-react";
 import { Conversation } from "../lib/api";
 
 export type Page = "core" | "chat" | "code" | "projects" | "camera"
-  | "skills" | "settings" | "memory" | "dev" | "registry" | "routines" | "activity";
+  | "skills" | "settings" | "memory" | "dev" | "registry" | "routines" | "activity" | "setup";
 
 const NAV: { id: Page; icon: LucideIcon; label: string }[] = [
   { id: "core", icon: Orbit, label: "Core" },
@@ -19,6 +20,7 @@ const NAV: { id: Page; icon: LucideIcon; label: string }[] = [
   { id: "memory", icon: Brain, label: "Memory" },
   { id: "registry", icon: ListChecks, label: "Capabilities" },
   { id: "dev", icon: SquareTerminal, label: "Developer" },
+  { id: "setup", icon: ShieldCheck, label: "Setup check" },
   { id: "settings", icon: Settings, label: "Settings" },
 ];
 

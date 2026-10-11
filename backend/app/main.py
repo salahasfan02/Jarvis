@@ -18,7 +18,7 @@ from .plugins import loader as plugin_loader
 # Importing the builtin tool modules registers their tools.
 from .tools.builtin import (  # noqa: F401
     browser, calendars, control, documents, filesystem, imessage, macos, mail, music,
-    office, people, routine_tools, screen_click, shortcuts, system, web)
+    office, people, routine_tools, screen_click, shortcuts, system, timer_tools, web)
 
 
 @asynccontextmanager
@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
     await telegram.start()  # no-op unless the phone channel is set up
     from . import routines
     routines.start()   # scheduled routines and triggers
+    from . import timers
+    timers.restore()   # timers that were running before a restart
     from . import warmup
     warmup.schedule()  # load the chat model, Whisper and Kokoro in the background
     yield

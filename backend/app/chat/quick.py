@@ -114,6 +114,15 @@ def _open(target: str) -> QuickAction | None:
         return QuickAction("browser_open", {"url": SITES[key]}, f"Opening {name}.")
     if _DOMAIN.fullmatch(key):
         return QuickAction("browser_open", {"url": key}, f"Opening {key}.")
+    # "open my CV" / "open the lease pdf": a file with one clear match.
+    if len(key) >= 2 and not re.search(r"\b(?:tab|window|page|door|camera|settings)\b", key):
+        from ..tools.builtin.documents import find_file
+        try:
+            path, candidates = find_file(key)
+        except Exception:
+            path = None
+        if path is not None:
+            return QuickAction("open_file", {"path": str(path)}, f"Opening {path.name}.")
     return None
 
 
@@ -134,7 +143,13 @@ def match(text: str) -> QuickAction | None:
     """Return the instant action for `text`, or None to let the model handle it."""
     t = _normalize(text)
     low = t.lower()
-    if not low or len(low) > 80 or " and " in f" {low} " or "," in low:
+    if not low or len(low) > 120:
+        return None
+    # Timers, reminders, volume, time and sums may contain "and" ("an hour and a
+    # half", "remind me to buy milk and eggs at 6"), so they're matched first.
+    if action := _instant(t, low):
+        return action
+    if len(low) > 80 or " and " in f" {low} " or "," in low:
         return None  # compound or long requests need real understanding
 
     # YouTube first: "open drake on youtube" is a video, not an app called that.
@@ -163,6 +178,95 @@ def match(text: str) -> QuickAction | None:
         if word in _NEEDS_TARGET and not target:
             return None
         return media_action(_MEDIA[word], video=target in ("video", "youtube"))
+    return None
+
+
+# ---- timers, reminders, volume, time, sums, undo ---------------------------------------
+
+_WORD_OPS = [(r"\s*(?:times|multiplied by|x)\s*", "*"), (r"\s*divided by\s*", "/"),
+             (r"\s*plus\s*", "+"), (r"\s*minus\s*", "-"), (r"\s*to the power of\s*", "**"),
+             (r"\s*squared", "**2"), (r"\s*cubed", "**3")]
+
+
+def _math(expr: str) -> str | None:
+    """'17% of 2340' / '23 times 19' / '(4+5)*2' -> a calculator expression."""
+    e = expr.lower().strip().rstrip("?").replace(",", "")
+    if m := re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:%|percent)\s+of\s+(\d+(?:\.\d+)?)", e):
+        return f"{m.group(1)}/100*{m.group(2)}"
+    if m := re.fullmatch(r"(?:the\s+)?square root of\s+(\d+(?:\.\d+)?)", e):
+        return f"sqrt({m.group(1)})"
+    for pat, op in _WORD_OPS:
+        e = re.sub(pat, op, e)
+    e = e.replace("×", "*").replace("÷", "/").replace("^", "**")
+    if re.fullmatch(r"[\d.+\-*/() ]+", e) and re.search(r"\d\s*[+\-*/]", e):
+        return e.replace(" ", "")
+    return None
+
+
+def _instant(t: str, low: str) -> QuickAction | None:
+    from datetime import datetime
+    from .timeparse import duration, when
+
+    # "set a (pasta) timer for 10 minutes" / "timer 5 min" / "10 minute timer (for pasta)"
+    if m := re.fullmatch(r"(?:set|start|make)?\s*(?:a|an|the|my)?\s*(?:(?P<label>[a-z ]{2,30}?)\s+)?"
+                         r"timer\s+(?:for\s+)?(?P<dur>.+)", low):
+        if (secs := duration(m.group("dur"))) and (m.group("label") or "").strip() not in ("cancel", "stop"):
+            label = (m.group("label") or "").strip()
+            return QuickAction("set_timer", {"seconds": secs, "label": label}, "{output}")
+    if m := re.fullmatch(r"(?:set|start)?\s*(?:a|an)?\s*(?P<dur>.+?)\s+timer(?:\s+for\s+(?P<label>.+))?", low):
+        if secs := duration(m.group("dur")):
+            return QuickAction("set_timer", {"seconds": secs, "label": (m.group("label") or "").strip()},
+                               "{output}")
+    # "remind me in 20 minutes to X" / "remind me to X in 20 minutes"
+    if m := (re.fullmatch(r"remind me in\s+(?P<dur>.+?)\s+to\s+(?P<task>.+)", low)
+             or re.fullmatch(r"remind me to\s+(?P<task>.+?)\s+in\s+(?P<dur>.+)", low)):
+        if secs := duration(m.group("dur")):
+            task = t[m.start("task"):m.end("task")]
+            return QuickAction("set_timer", {"seconds": secs, "label": task, "reminder": True},
+                               "{output}")
+    # "remind me at 6 to X" / "remind me tomorrow at 9 to X" / "remind me to X at 6pm"
+    if m := (re.fullmatch(r"remind me\s+(?P<when>(?:(?:today|tonight|tomorrow|on \w+day)\s+)?"
+                          r"(?:at\s+)?[\d:.]+\s*(?:am|pm)?|(?:today|tonight|tomorrow|on \w+day)\s+at\s+"
+                          r"[\d:.]+\s*(?:am|pm)?|at noon|at midnight)\s+to\s+(?P<task>.+)", low)
+             or re.fullmatch(r"remind me to\s+(?P<task>.+?)\s+(?P<when>(?:(?:today|tonight|tomorrow|"
+                             r"on \w+day)\s+)?at\s+[\d:.]+\s*(?:am|pm)?|(?:today|tonight|tomorrow)"
+                             r"\s+at\s+[\d:.]+\s*(?:am|pm)?|at noon|at midnight)", low)):
+        if due := when(m.group("when")):
+            task = t[m.start("task"):m.end("task")]
+            return QuickAction("create_reminder", {"title": task[0].upper() + task[1:],
+                                                   "due": due.strftime("%Y-%m-%d %H:%M")}, "")
+    # timers: cancel / how long left
+    if m := re.fullmatch(r"(?:cancel|stop|delete|kill|turn off)\s+(?:the\s+|my\s+)?(?:(?P<label>.+?)\s+)?timers?", low):
+        return QuickAction("timers", {"cancel": True, "label": (m.group("label") or "").strip()}, "")
+    if re.fullmatch(r"how (?:long|much time)(?: is| has| do i have)? (?:left|remaining)(?: on (?:the|my) .*timer)?"
+                    r"|(?:how'?s|check) (?:the |my )?timers?", low):
+        return QuickAction("timers", {}, "")
+    # volume
+    if m := re.fullmatch(r"(?:turn\s+)?(?:the\s+)?(?:volume|sound)\s+(up|down)|turn (?:it|the sound|the volume) (up|down)", low):
+        return QuickAction("set_volume", {"change": m.group(1) or m.group(2)}, "")
+    if low in ("louder", "a bit louder", "quieter", "a bit quieter", "softer"):
+        return QuickAction("set_volume", {"change": "up" if "loud" in low else "down"}, "")
+    if m := re.fullmatch(r"(?:set\s+)?(?:the\s+)?volume\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)?", low):
+        return QuickAction("set_volume", {"level": int(m.group(1))}, "")
+    if re.fullmatch(r"mute (?:the )?(?:volume|sound|mac|computer)", low):
+        return QuickAction("set_volume", {"change": "mute"}, "")
+    if re.fullmatch(r"unmute (?:the )?(?:volume|sound|mac|computer)", low):
+        return QuickAction("set_volume", {"change": "unmute"}, "")
+    # time and date — answered right away
+    now = datetime.now()
+    if re.fullmatch(r"what(?:'s| is)? the time|what time is it|time\??|what'?s the time now", low):
+        return QuickAction("current_datetime", {}, f"It's {now.strftime('%-I:%M %p').lower()}.")
+    if re.fullmatch(r"what(?:'s| is)? (?:the date|today'?s date)(?: today)?|what day is (?:it|today)"
+                    r"|what'?s today", low):
+        return QuickAction("current_datetime", {}, f"It's {now.strftime('%A, %-d %B %Y')}.")
+    # sums
+    if m := re.fullmatch(r"(?:what'?s|what is|calculate|how much is|work out)\s+(.+)", low):
+        if expr := _math(m.group(1)):
+            return QuickAction("calculator", {"expression": expr},
+                               f"{m.group(1).strip().rstrip('?')} is {{output}}.")
+    # undo
+    if re.fullmatch(r"undo(?: that| it| the last (?:thing|action))?|put it back|take that back", low):
+        return QuickAction("undo_last", {}, "")
     return None
 
 
@@ -226,7 +330,20 @@ def reply_for(action: QuickAction, output: str) -> str:
     when it went wrong (so the user learns why)."""
     if not action.reply or output.strip().lower().startswith(_FAILED):
         return output.strip() or action.reply or "Done."
+    if "{output}" in action.reply:
+        return action.reply.format(output=_tidy_number(output.strip()))
     return action.reply
+
+
+def _tidy_number(text: str) -> str:
+    """397.80000000000001 -> 397.8, 1200.0 -> 1,200"""
+    try:
+        value = float(text)
+    except ValueError:
+        return text
+    if value == int(value) and abs(value) < 1e15:
+        return f"{int(value):,}"
+    return f"{value:,.6f}".rstrip("0").rstrip(".")
 
 
 def enabled() -> bool:

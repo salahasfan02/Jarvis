@@ -543,6 +543,31 @@ def telegram_unpair(user_id: int):
 
 # --- screen activity frame -------------------------------------------------------
 
+# --- setup check ------------------------------------------------------------------------
+
+@router.get("/setup/check")
+async def setup_check_all():
+    from .. import setup_check
+    return await setup_check.run_all()
+
+
+@router.post("/setup/fix/{cid:path}")
+async def setup_fix(cid: str):
+    from .. import setup_check
+    try:
+        return await setup_check.fix(cid)
+    except Exception as e:
+        return {"result": f"Couldn't fix that automatically: {e}"}
+
+
+@router.post("/setup/open/{kind}")
+async def setup_open_pane(kind: str):
+    """Open a System Settings privacy pane (camera, microphone, …)."""
+    from .. import setup_check
+    setup_check.open_pane(kind)
+    return {"ok": True}
+
+
 # --- activity log & undo --------------------------------------------------------------
 
 @router.get("/activity")

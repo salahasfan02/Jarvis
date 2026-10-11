@@ -723,3 +723,13 @@ html.electron .app { padding-top: 28px; box-sizing: border-box; }
 .routine-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-dim); }
 .routine-form .routine-days { display: flex; gap: 10px; flex-wrap: wrap; }
 .routine-form .routine-days label { flex-direction: row; align-items: center; gap: 4px; }
+
+/* setup check */
+.setup-row { display: flex; gap: 12px; align-items: center; padding: 8px 0;
+             border-top: 1px solid var(--border); }
+.setup-row:first-of-type { border-top: none; }
+.setup-banner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 20;
+                padding: 6px 14px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
+                background: rgba(245, 166, 35, 0.15); color: #f5a623;
+                border: 1px solid rgba(245, 166, 35, 0.5); }
+.main { position: relative; }

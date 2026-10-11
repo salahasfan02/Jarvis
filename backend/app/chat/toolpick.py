@@ -73,6 +73,8 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     "tell me when": ("create_routine", "watch_screen"), "let me know when": ("create_routine", "watch_screen"),
     "arrives": ("create_routine",),
     "undo": ("undo_last",), "put it back": ("undo_last",),
+    "timer": ("set_timer", "timers"), "volume": ("set_volume",), "louder": ("set_volume",),
+    "quieter": ("set_volume",), "remind me in": ("set_timer",),
     "shortcut": ("run_shortcut", "list_shortcuts"), "scene": ("run_shortcut",),
     "lights": ("run_shortcut",), "focus": ("run_shortcut",), "homekit": ("run_shortcut",),
 }

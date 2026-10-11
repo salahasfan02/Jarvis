@@ -29,6 +29,32 @@ def _osascript(script: str, timeout: int = 30) -> str:
     return result.stdout.strip() or "OK"
 
 
+def as_date(var: str, dt) -> str:
+    """AppleScript lines that set `var` to datetime `dt`, built from its parts.
+    `date "2026-10-11 18:00"` depends on the Mac's region: on a UK Mac it
+    became 17 April 2017, and Calendar's format failed outright."""
+    return (f"set {var} to current date\n"
+            f"set day of {var} to 1\n"            # no month overflow (31 Jan -> Feb)
+            f"set year of {var} to {dt.year}\n"
+            f"set month of {var} to {dt.month}\n"
+            f"set day of {var} to {dt.day}\n"
+            f"set hours of {var} to {dt.hour}\n"
+            f"set minutes of {var} to {dt.minute}\n"
+            f"set seconds of {var} to 0\n")
+
+
+def parse_when(text: str):
+    """'2026-10-11 18:00' (or with T / seconds) -> datetime, else None."""
+    import datetime
+    text = (text or "").strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 def _q(s: str) -> str:
     """Escape a string for embedding in an AppleScript double-quoted literal."""
     return s.replace("\\", "\\\\").replace('"', '\\"')
@@ -222,19 +248,14 @@ def append_note(title: str, text: str) -> str:
 )
 def calendar_create_event(title: str, start: str, end: str = "", location: str = "") -> str:
     import datetime
-    try:
-        start_dt = datetime.datetime.strptime(start, "%Y-%m-%d %H:%M")
-        end_dt = (datetime.datetime.strptime(end, "%Y-%m-%d %H:%M") if end
-                  else start_dt + datetime.timedelta(hours=1))
-    except ValueError:
+    start_dt = parse_when(start)
+    end_dt = parse_when(end) if end else (start_dt + datetime.timedelta(hours=1) if start_dt else None)
+    if start_dt is None or end_dt is None:
         return "Invalid date format — use YYYY-MM-DD HH:MM."
-    fmt = "%A, %B %d, %Y %H:%M:%S"  # AppleScript-friendly
     props = f'summary:"{_q(title)}", start date:startD, end date:endD'
     if location:
         props += f', location:"{_q(location)}"'
-    script = f'''
-    set startD to date "{start_dt.strftime(fmt)}"
-    set endD to date "{end_dt.strftime(fmt)}"
+    script = as_date("startD", start_dt) + as_date("endD", end_dt) + f'''
     tell application "Calendar"
         tell calendar 1
             make new event with properties {{{props}}}
@@ -259,10 +280,15 @@ def calendar_create_event(title: str, start: str, end: str = "", location: str =
 def create_reminder(title: str, due: str = "") -> str:
     props = f'{{name:"{_q(title)}"}}'
     if due:
-        return _osascript(
-            f'set dueDate to date "{_q(due)}"\n'
-            f'tell application "Reminders" to make new reminder with properties '
-            f'{{name:"{_q(title)}", due date:dueDate}}')
+        when = parse_when(due)
+        if when is None:
+            return "Invalid due date — use YYYY-MM-DD HH:MM."
+        out = _osascript(
+            as_date("dueDate", when)
+            + f'tell application "Reminders" to make new reminder with properties '
+            f'{{name:"{_q(title)}", due date:dueDate, remind me date:dueDate}}')
+        return out if out.startswith(("AppleScript error", "Failed")) else \
+            f"Reminder set: {title} — {when:%a %d %b at %H:%M}."
     return _osascript(
         f'tell application "Reminders" to make new reminder with properties {props}')
 

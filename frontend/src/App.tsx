@@ -7,12 +7,20 @@ import { MatrixRain } from "./components/MatrixRain";
 import { WorldMap } from "./components/WorldMap";
 import { Page, Sidebar } from "./components/Sidebar";
 import { API, api, Attachment, Conversation, expandSkill, Message, Skill, skillsApi } from "./lib/api";
-import { enqueueSpeech, playWakeChime, speechSupported, stopSpeaking, voiceBus, VoiceEngine, WhisperVoiceEngine } from "./lib/voice";
+import { enqueueSpeech, playWakeChime, prewarmPhrases, speechSupported, stopSpeaking, voiceBus, VoiceEngine, WhisperVoiceEngine } from "./lib/voice";
+
+// Said straight away when a spoken request will take a moment (by agent).
+const ACKS: Record<string, string> = {
+  research: "Let me look that up.", files: "Checking your files.", messaging: "One moment.",
+  vision: "Let me take a look.", automation: "On it.", media: "On it.",
+  coding: "Let me think about that.", planner: "Okay, working on it.", general: "One moment.",
+};
 import { ChatEvent, ChatSocket } from "./lib/ws";
 import { requestFrame } from "./lib/camera";
 import { CameraPage } from "./pages/CameraPage";
 import { RoutinesPage } from "./pages/RoutinesPage";
 import { ActivityPage } from "./pages/ActivityPage";
+import { SetupPage } from "./pages/SetupPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SkillsPage } from "./pages/SkillsPage";
@@ -42,6 +50,23 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [announcement, setAnnouncement] = useState<{ title: string; text: string } | null>(null);
+  // Synthesize the acknowledgment phrases once (and again if the voice changes).
+  useEffect(() => {
+    const v = settings?.voice as any;
+    if (v?.tts_enabled) {
+      prewarmPhrases([...new Set(Object.values(ACKS))],
+                     `${v.tts_engine}|${v.kokoro_voice}|${v.tts_voice}`);
+    }
+  }, [settings?.voice?.tts_enabled, settings?.voice?.tts_voice,
+      (settings?.voice as any)?.kokoro_voice, settings?.voice?.tts_engine]);
+
+  // Anything Jarvis needs but doesn't have (permissions, models): checked
+  // once at start-up and shown as a banner on the Core screen.
+  const [setupProblems, setSetupProblems] = useState(0);
+  useEffect(() => {
+    fetch(`${API}/setup/check`).then((r) => r.json())
+      .then((r) => setSetupProblems(r.problems ?? 0)).catch(() => {});
+  }, [page === "setup"]);
   useEffect(() => {
     if (!announcement) return;
     const t = setTimeout(() => setAnnouncement(null), 15000);
@@ -59,6 +84,8 @@ export default function App() {
   settingsRef.current = settings;
   const streamBuf = useRef("");
   const spokenRef = useRef(0);   // chars of the stream already sent to TTS
+  const ackTimer = useRef<any>(null);
+  const agentIdRef = useRef("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const busyRef = useRef(false);
   busyRef.current = busy;
@@ -87,6 +114,15 @@ export default function App() {
     let cut = -1;
     if (flushAll) {
       cut = unspoken.length;
+    } else if (spokenRef.current === 0) {
+      // The very first words: start at the first phrase break, so Jarvis
+      // starts talking as early as possible ("Sure, the capital of France…").
+      const re = /[.!?,;:—–][)"'”]?(?=\s)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(unspoken))) {
+        if (m.index + m[0].length >= 18) { cut = m.index + m[0].length; break; }
+      }
+      if (cut < 18) return;
     } else {
       const re = /[.!?][)"'”]?(?=\s|$)/g;
       let m: RegExpExecArray | null;
@@ -124,7 +160,20 @@ export default function App() {
     setInput("");
     // Deliberately no navigation: talking from the Core stays on the Core.
     // Spoken requests get short, speakable answers.
-    socket.chat(target, content, modeRef.current, lastInputWasVoice.current === true);
+    const spoken = lastInputWasVoice.current === true;
+    socket.chat(target, content, modeRef.current, spoken);
+    // If the answer takes more than a moment, say so right away ("Let me look
+    // that up.") — instant commands answer before this fires.
+    clearTimeout(ackTimer.current);
+    agentIdRef.current = "";
+    const st = settingsRef.current;
+    if (spoken && st?.voice?.tts_enabled) {
+      ackTimer.current = setTimeout(() => {
+        if (streamBuf.current || !busyRef.current || agentIdRef.current === "quick") return;
+        if (pageRef.current !== "core" && pageRef.current !== "camera") return;
+        enqueueSpeech(ACKS[agentIdRef.current] ?? "One moment.", st.voice.tts_rate, st.voice.tts_voice);
+      }, 1100);
+    }
   }, [socket]);
 
   // ---- attachments & workspace mode ----
@@ -228,8 +277,10 @@ export default function App() {
           break;
         case "agent":
           setAgentName(e.agent.name);
+          agentIdRef.current = e.agent.id;
           break;
         case "token":
+          clearTimeout(ackTimer.current);
           streamBuf.current += e.content;
           setStreaming(streamBuf.current);
           speakStreamedSentences(false);
@@ -275,6 +326,7 @@ export default function App() {
             i === e.index ? { ...chip, status: e.status } : chip));
           break;
         case "done": {
+          clearTimeout(ackTimer.current);
           setBusy(false);
           setStreaming(null);
           setChips([]);
@@ -684,6 +736,11 @@ export default function App() {
             </div>
           </div>
         )}
+        {page === "core" && setupProblems > 0 && (
+          <button className="setup-banner" onClick={() => setPage("setup")}>
+            Some things Jarvis needs aren't set up yet — open Setup check
+          </button>
+        )}
         {page === "core" && (
           <DashboardPage
             busy={busy}
@@ -716,6 +773,7 @@ export default function App() {
         {page === "skills" && <SkillsPage />}
         {page === "routines" && <RoutinesPage />}
         {page === "activity" && <ActivityPage />}
+        {page === "setup" && <SetupPage onOpenSettings={() => setPage("settings")} />}
         {page === "camera" && (
           <CameraPage speakReplies={settings?.voice?.tts_enabled ?? false}
                       jarvisReply={busy ? streaming
