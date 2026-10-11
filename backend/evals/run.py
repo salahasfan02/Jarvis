@@ -63,6 +63,12 @@ def fake_output(name: str, args: dict) -> str:
     if name == "ui_elements":
         return ("Google Chrome — 6 controls:\n1. button 'Back'\n2. text field 'Search'\n"
                 "3. link 'Sign in'\n4. button 'Subscribe'\n5. link 'Home'\n6. button 'Menu'")
+    if name in ("create_routine", "list_routines"):   # throwaway data: run for real
+        from app.tools.builtin import routine_tools
+        try:
+            return getattr(routine_tools, name)(**args)
+        except TypeError as e:
+            return f"Error: {e}"
     if name in ("find_person", "remember_person"):   # harmless: Jarvis's own (throwaway) data
         from app.memory import people
         if name == "remember_person":
@@ -78,10 +84,17 @@ def fake_output(name: str, args: dict) -> str:
         return (f"Created Word document '{args.get('title')}' at "
                 f"{FAKE_HOME}/Documents/Jarvis/{slug}.docx. If the user wants it on their "
                 "phone, call send_file with this path.")
+    if name in ("send_reply", "draft_reply", "read_email"):
+        if str(args.get("id")) not in ("101", "102", "103"):
+            return f"Couldn't find an email with id {args.get('id')}."
+        return "Reply sent." if name == "send_reply" else (
+            "Reply draft opened in Mail." if name == "draft_reply" else "From: Sam Lee\nMeeting moved.")
     if name == "send_email":
         return f"Email sent to {args.get('to')}."
     if name == "draft_email":
         return "Draft saved in Mail and opened for review."
+    if name == "browser_read_page":
+        return "Electric cars use batteries and motors; they are cheaper to run but cost more upfront."
     if name == "browser_tabs":
         return "Google Chrome front window tabs:\n" + "\n".join(
             f"{t['index']}. {t['title']} — {t['url']}" for t in TABS)
@@ -180,6 +193,8 @@ async def run_case(case: dict, verbose: bool) -> dict:
         return fake_output(name, arguments)
 
     tools.execute = fake_execute
+    from app.automation import selection
+    selection.describe = lambda: case.get("this", "")   # what's on screen for this case
     from app.memory import people
     for p in people.all_people():          # each case starts with only its own people
         people.forget(p["name"])

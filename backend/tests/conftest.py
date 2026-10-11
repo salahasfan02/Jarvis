@@ -51,3 +51,10 @@ def _no_real_input(monkeypatch):
     except ImportError:
         return
     monkeypatch.setattr(Quartz, "CGEventPost", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_contacts_lookup(monkeypatch):
+    """Looking people up in the Mac's Contacts app is not for tests."""
+    from app.memory import people
+    monkeypatch.setattr(people, "from_contacts", lambda q: [])

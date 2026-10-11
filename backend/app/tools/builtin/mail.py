@@ -227,8 +227,9 @@ def _reply(id: int, body: str, reply_all: bool, send: bool) -> str:  # noqa: A00
 
 @tool(
     name="draft_reply",
-    description="Draft a reply to an email (by id) and open it in Mail for the user to "
-                "review. Use when the user says reply/answer/respond without saying send.",
+    description="Draft a reply to an email the user RECEIVED (its id from read_emails/"
+                "search_emails) and open it in Mail for review. Use when they say reply/"
+                "answer/respond without saying send. For a NEW email use draft_email.",
     parameters={
         "type": "object",
         "properties": {
@@ -246,8 +247,9 @@ def draft_reply(id: int, body: str, reply_all: bool = False) -> str:  # noqa: A0
 
 @tool(
     name="send_reply",
-    description="SEND a reply to an email (by id) right away. Only when the user explicitly "
-                "says to send it; they approve the exact text first.",
+    description="SEND a reply to an email the user RECEIVED (its id from read_emails/"
+                "search_emails). Only when they explicitly say send; they approve the text "
+                "first. For a NEW email (not a reply) use send_email.",
     parameters={
         "type": "object",
         "properties": {

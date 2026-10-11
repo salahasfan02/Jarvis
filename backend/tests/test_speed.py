@@ -127,7 +127,8 @@ def test_the_prompt_prefix_stays_identical_between_messages(monkeypatch):
     ticks = iter(["Monday 09:00", "Monday 09:07"])
     real_block = service._dynamic_block
     monkeypatch.setattr(service, "_dynamic_block",
-                        lambda m, c: real_block(m, c) + f"\nclock {next(ticks)}")
+                        lambda m, c, this="", role="": real_block(m, c, this, role)
+                        + f"\nclock {next(ticks)}")
     conv = db.create_conversation()
     _turn(conv["id"], "tell me something interesting about owls")
     _turn(conv["id"], "tell me another interesting fact about owls")

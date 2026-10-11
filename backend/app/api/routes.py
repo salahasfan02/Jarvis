@@ -543,6 +543,49 @@ def telegram_unpair(user_id: int):
 
 # --- screen activity frame -------------------------------------------------------
 
+# --- routines & triggers ------------------------------------------------------------
+
+@router.get("/routines")
+async def routines_list():
+    from .. import routines
+    return [{k: v for k, v in r.items() if k != "state"} for r in routines.all_routines()]
+
+
+@router.put("/routines/{rid}")
+async def routines_update(rid: str, body: dict):
+    from .. import routines
+    if "enabled" in body:
+        routines.update(rid, enabled=bool(body["enabled"]))
+    return {"ok": True}
+
+
+@router.delete("/routines/{rid}")
+async def routines_delete(rid: str):
+    from .. import routines
+    routines.remove(rid)
+    return {"ok": True}
+
+
+@router.post("/routines/{rid}/run")
+async def routines_run(rid: str):
+    from .. import routines
+    r = routines.get(rid)
+    if r is None:
+        return {"error": "no such routine"}
+    return {"result": await routines.fire(r)}
+
+
+@router.post("/chat/prefetch")
+async def chat_prefetch(body: dict):
+    """Voice: the first words of a request while the user is still speaking —
+    warm the model up for the reply (see chat/prefetch.py)."""
+    from ..chat import prefetch
+    try:
+        return await prefetch.warm(body.get("conversation_id"), body.get("text", ""))
+    except Exception as e:
+        return {"skipped": f"error: {e}"}
+
+
 @router.post("/screen/stop")
 async def screen_stop(body: dict | None = None):
     """Emergency stop: Esc while the frame is up, or "Jarvis stop"."""

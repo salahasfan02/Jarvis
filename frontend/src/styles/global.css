@@ -705,3 +705,15 @@ html.electron .app { padding-top: 28px; box-sizing: border-box; }
 .heard-list { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; padding: 2px 0 8px; }
 .heard-dot { width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; }
 .heard-dot::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); }
+
+/* routine / trigger announcements */
+.announce {
+  position: fixed; right: 18px; bottom: 18px; z-index: 900;
+  max-width: min(380px, calc(100vw - 36px)); padding: 12px 14px; border-radius: 12px;
+  background: var(--panel, #0d1510); border: 1px solid var(--accent, #00ff66);
+  box-shadow: 0 0 24px rgba(0, 255, 102, 0.25); cursor: pointer; white-space: pre-wrap;
+  animation: announce-in .25s ease-out;
+}
+.announce-title { font-weight: 600; font-size: 12.5px; color: var(--accent, #00ff66); margin-bottom: 4px; }
+.announce-text { font-size: 13.5px; line-height: 1.45; max-height: 40vh; overflow: auto; }
+@keyframes announce-in { from { transform: translateY(12px); opacity: 0; } }

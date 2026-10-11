@@ -11,6 +11,7 @@ import { enqueueSpeech, playWakeChime, speechSupported, stopSpeaking, voiceBus, 
 import { ChatEvent, ChatSocket } from "./lib/ws";
 import { requestFrame } from "./lib/camera";
 import { CameraPage } from "./pages/CameraPage";
+import { RoutinesPage } from "./pages/RoutinesPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SkillsPage } from "./pages/SkillsPage";
@@ -39,6 +40,12 @@ export default function App() {
   const [agentName, setAgentName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [announcement, setAnnouncement] = useState<{ title: string; text: string } | null>(null);
+  useEffect(() => {
+    if (!announcement) return;
+    const t = setTimeout(() => setAnnouncement(null), 15000);
+    return () => clearTimeout(t);
+  }, [announcement]);
   const [input, setInput] = useState("");
   const [voiceState, setVoiceState] = useState<"idle" | "listening" | "waiting-wake">("idle");
   const [interim, setInterim] = useState("");
@@ -198,6 +205,13 @@ export default function App() {
             refreshConversations();
           }
           break;
+        case "announce":
+          // A routine or trigger fired: show it, and say it if voice is on.
+          setAnnouncement({ title: e.title, text: e.text });
+          if (e.speak && settingsRef.current?.voice?.tts_enabled) {
+            enqueueSpeech(e.text, settingsRef.current.voice.tts_rate, settingsRef.current.voice.tts_voice);
+          }
+          break;
         case "ui_request":
           // A tool needs the window itself, e.g. "open the camera and tell me
           // what you see": show the Camera tab and hand back a photo.
@@ -344,6 +358,12 @@ export default function App() {
       onWake: () => {
         stopSpeaking();
         playWakeChime();   // audible confirmation that Jarvis is listening
+        // While the user says the command, make sure the model has the prompt
+        // opening ready (usually cached already; see chat/prefetch.py).
+        fetch(`${API}/chat/prefetch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversation_id: activeIdRef.current }),
+        }).catch(() => {});
       },
       onStateChange: setVoiceState,
       onPermissionDenied: () => setWakeWanted(false),
@@ -691,6 +711,7 @@ export default function App() {
         )}
         {page === "projects" && <ProjectsPage onOpenConversation={openConversation} />}
         {page === "skills" && <SkillsPage />}
+        {page === "routines" && <RoutinesPage />}
         {page === "camera" && (
           <CameraPage speakReplies={settings?.voice?.tts_enabled ?? false}
                       jarvisReply={busy ? streaming
@@ -728,6 +749,12 @@ export default function App() {
         )}
       </div>
 
+      {announcement && (
+        <div className="announce" role="status" onClick={() => setAnnouncement(null)}>
+          <div className="announce-title">{announcement.title}</div>
+          <div className="announce-text">{announcement.text}</div>
+        </div>
+      )}
       {confirm && (
         <ConfirmModal
           request={confirm}

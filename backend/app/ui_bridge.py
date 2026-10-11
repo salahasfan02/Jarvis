@@ -160,6 +160,20 @@ async def request(kind: str, payload: dict | None = None, timeout: float = 20) -
         _pending.pop(rid, None)
 
 
+async def announce(title: str, text: str, speak: bool = True) -> bool:
+    """Show (and speak) a message in every open Jarvis window — routines,
+    triggers. Returns whether any window got it."""
+    sent = False
+    for ws in list(_sockets):
+        try:
+            await ws.send_json({"type": "announce", "title": title, "text": text,
+                                "speak": speak})
+            sent = True
+        except Exception:
+            unregister(ws)
+    return sent
+
+
 def resolve(rid: str, data: dict | None) -> None:
     future = _pending.get(rid)
     if future and not future.done():

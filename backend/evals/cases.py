@@ -114,6 +114,31 @@ CASES = [
      "fail": {"send_email": "Attachment not found: nonexistent-xyz.pdf.", "search_files": "No files found."},
      "reply_not": r"(?i)\b(i(?:'ve| have)? sent|has been sent|successfully sent|email sent)\b"},
 
+    # --- routines & triggers -------------------------------------------------------------------
+    {"say": "every weekday at 8am send me my daily briefing on telegram", "tools": ["create_routine"],
+     "args": {"create_routine": {"at": "8", "action": "brief", "deliver": "telegram"}}},
+    {"say": "tell me when an email from my landlord arrives", "tools": ["create_routine"],
+     "args": {"create_routine": {"trigger": "email", "email_from": "landlord"}}},
+    {"say": "remind me 10 minutes before my meetings", "tools": ["create_routine"],
+     "args": {"create_routine": {"trigger": "calendar", "minutes_before": "10"}}},
+    {"say": "what routines do I have set up", "tools": ["list_routines"]},
+
+    # --- "this" / "that": what the user is looking at ------------------------------------------
+    {"say": f"email this to {ME}", "tools": ["send_email"],
+     "this": "App the user is in: Preview\nOpen document: /Users/salah/Documents/lease.pdf  "
+             "(read it with read_document; attach this path)",
+     "args": {"send_email": {"to": ME, "attachments": "lease.pdf"}}},
+    {"say": "summarize this page", "tools": ["browser_read_page"],
+     "this": "App the user is in: Google Chrome\nBrowser page: Electric cars explained — "
+             "https://example.com/ev  (read it with browser_read_page)"},
+    {"say": "what does this mean", "no_tools": True, "reply": "(?i)photosynth|light|plant",
+     "this": "App the user is in: Notes\nHighlighted text:\n\"\"\"\nPhotosynthesis converts "
+             "light energy into chemical energy in plants.\n\"\"\""},
+    {"say": "open this in Finder", "tools": [["open_file"]],
+     "this": "App the user is in: Microsoft Word\nOpen document: /Users/salah/Documents/report.docx  "
+             "(read it with read_document; attach this path)",
+     "args": {"open_file": {"path": "report"}}},
+
     # --- phone (Telegram) ---------------------------------------------------------------------------
     {"say": "send me my CV", "phone": True, "tools": ["send_file"], "args": {"send_file": {"path": "cv"}}},
     {"say": "send me the latest screenshot from my desktop", "phone": True,

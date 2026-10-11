@@ -11,7 +11,7 @@ from evals.run import setup  # isolated home + fakes
 
 async def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--keep", type=int, default=10)
+    ap.add_argument("--keep", type=int, default=4)
     a = ap.parse_args()
     setup(None, None)
     from app.agents import registry as agents
@@ -27,18 +27,19 @@ async def main() -> None:
         if case.get("phone"):
             offered = __import__("app.tools.base", fromlist=["registry"]).registry.for_agent(
                 [*agent.tool_tags, "remote"]) if agent.tool_tags else offered
-        chosen = await toolpick.select(case["say"], offered, keep=a.keep)
+        chosen = toolpick.arrange(await toolpick.select(case["say"], offered, keep=a.keep))
         names = {t.name for t in chosen}
-        tokens = round(len(json.dumps([t.to_ollama() for t in chosen])) / 3.7)
+        core_n = len(toolpick.arrange([]))
+        tokens = round(len(json.dumps([t.to_ollama() for t in chosen[core_n:]])) / 3.7)
         sizes.append(tokens)
         for options in want:
             total += 1
             if not names & set(options):
                 missed += 1
-                where = "agent lacks it" if not {t.name for t in offered} & set(options) else "dropped"
+                where = ("dropped" if {t.name for t in offered} & set(options) else "agent lacks it")
                 print(f"MISS [{agent.id:10s}] {case['say'][:55]:55s} needs {'/'.join(options)} ({where})")
     print(f"\nkept {total - missed}/{total} needed tools · keep={a.keep} · "
-          f"median tool tokens {sorted(sizes)[len(sizes) // 2]} (max {max(sizes)})")
+          f"median EXTRA tool tokens {sorted(sizes)[len(sizes) // 2]} (max {max(sizes)})")
 
 
 asyncio.run(main())

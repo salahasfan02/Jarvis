@@ -225,8 +225,18 @@ def test_send_requests_get_send_tools_and_fake_claims_are_challenged(monkeypatch
         return events
 
     events = asyncio.run(main())
-    assert "send_email" in seen[0]["tools"] and "draft_email" not in seen[0]["tools"]
+    # Every request carries the same core tools (cached prompt opening); a
+    # draft-only request turns sends into drafts at execution instead.
+    assert "send_email" in seen[0]["tools"]
     assert seen[1]["last"] == service.CLAIM_NUDGE
     assert any(e["type"] == "confirm_request" and e["tool"] == "send_email" for e in events)
     done = next(e for e in events if e["type"] == "done")
     assert "I've drafted" not in done["content"]   # the false claim isn't kept
+
+
+def test_a_draft_request_never_sends():
+    assert service._respect_intent("draft an email to Sam", "send_email") == "draft_email"
+    assert service._respect_intent("don't send it yet, reply to Kim", "send_reply") == "draft_reply"
+    assert service._respect_intent("send Sam an email", "send_email") == "send_email"
+    assert service._respect_intent("email my landlord that the boiler broke", "draft_email") == "send_email"
+    assert service._respect_intent("write and send a draft to Sam", "send_email") == "send_email"

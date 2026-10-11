@@ -25,6 +25,7 @@ from typing import AsyncIterator
 from .. import channels, db
 from ..agents import registry as agents
 from ..automation import context as app_context
+from ..automation import selection
 from ..config import settings
 from ..gaps import registry as gaps
 from ..llm import ollama_client
@@ -32,7 +33,7 @@ from ..memory import store as memory_store
 from ..security import audit
 from ..security.permissions import confirmations
 from ..tools import base as tools
-from . import quick, toolpick
+from . import prefetch, quick, toolpick
 
 SMART_WINDOW_RULES = """Smart context rules (IMPORTANT):
 - Before opening any website, check the open tabs (they are listed above, or
@@ -65,16 +66,15 @@ def _user_full_name() -> str:
         return ""
 
 
-def _static_system_prompt(agent: agents.Agent) -> str:
+def _static_system_prompt(agent: agents.Agent | None = None) -> str:
     """The big prompt (persona + rules; the tool schemas follow it in the
-    template). It must contain NOTHING that changes between messages: Ollama
-    reuses its work for an unchanged prefix, so the ~2-6k tokens of prompt and
-    tool schemas cost nothing after the first message."""
+    template). It must contain NOTHING that changes between messages — or
+    between agents: Ollama reuses its work for an unchanged prefix, so this
+    plus the core tools is read once and then shared by every request. The
+    agent's own instructions go in the per-message context block instead."""
     name = settings.get("assistant.name", "Jarvis")
     persona = settings.get("assistant.persona", "").format(name=name)
     parts = [persona]
-    if agent.prompt:
-        parts.append(agent.prompt)
     parts.append(SMART_WINDOW_RULES)
     parts.append(
         "When a tool would help, call it instead of guessing. Some tool calls "
@@ -87,10 +87,17 @@ def _static_system_prompt(agent: agents.Agent) -> str:
     return "\n\n".join(parts)
 
 
-def _dynamic_block(memories: list[dict], ctx: dict) -> str:
+def _dynamic_block(memories: list[dict], ctx: dict, this: str = "",
+                   role: str = "") -> str:
     """Small, changing facts for THIS message only (see CONTEXT_RULES)."""
     parts = ["Current date/time: "
              + datetime.datetime.now().strftime("%A, %B %d %Y, %H:%M")]
+    if role:
+        parts.append("How to handle this request:\n" + role)
+    if this:
+        parts.append("What \"this\"/\"that\" in the user's message refers to (use it — "
+                     "e.g. attach that path, read that page or document, use that text):\n"
+                     + this)
     ctx_summary = app_context.summary_for_prompt(ctx)
     if ctx_summary:
         parts.append("What the user is doing right now:\n" + ctx_summary)
@@ -98,7 +105,12 @@ def _dynamic_block(memories: list[dict], ctx: dict) -> str:
         facts = "\n".join(f"- {m['content']}" for m in memories)
         parts.append("Relevant things you remember about the user:\n" + facts)
     channel = channels.current.get()
-    if channel is not None:
+    if channel is not None and channel.name == "routine":
+        parts.append(
+            "This is an AUTOMATIC ROUTINE the user set up — they are not here to answer "
+            "questions. Do the task with your tools and reply with the result itself, "
+            "short and ready to read on a phone. Never ask anything.")
+    elif channel is not None:
         parts.append(
             f"The user is messaging you from their PHONE via {channel.name}, away "
             "from this Mac. Keep replies short and phone-friendly. When they ask "
@@ -216,19 +228,19 @@ _SAYS_SEND = re.compile(
     r"|\breply\b[^.?!]*\band send\b", re.I)
 
 
-def _for_intent(user_content: str, tool_list: list[tools.Tool]) -> list[tools.Tool]:
-    """Offer only the send tools when the user plainly says send, only the
-    draft tools when they say draft (and not send)."""
+def _respect_intent(user_content: str, name: str) -> str:
+    """Draft-only requests never send; send requests never stop at a draft.
+    Done here, not by hiding tools, so the cached prompt opening never changes."""
     dont_send = re.search(r"\b(?:don'?t|do not|not|never|without)\s+(?:send|sending)\b",
                           user_content, re.I)
     if dont_send or (_SAYS_DRAFT.search(user_content)
                      and not re.search(r"\bsend\b", user_content, re.I)):
-        drop = {"send_email", "send_reply"}
-    elif _SAYS_SEND.search(user_content):
-        drop = {"draft_email", "draft_reply"}
-    else:
-        return tool_list
-    return [t for t in tool_list if t.name not in drop]
+        return {"send_email": "draft_email", "send_reply": "draft_reply"}.get(name, name)
+    if _SAYS_SEND.search(user_content):
+        # They said send: a draft would leave it unsent. Sending still shows
+        # them the exact email to approve first.
+        return {"draft_email": "send_email", "draft_reply": "send_reply"}.get(name, name)
+    return name
 
 
 _CLAIMS_ACTION = re.compile(
@@ -267,6 +279,11 @@ _STALLS = re.compile(
 STALL_NUDGE = ("(The user already asked for this, and the tool asks them to approve it "
                "itself — don't ask in text. The tools find files and people by name, so "
                "call the tool now with what the user said.)")
+_WANTS_FILE = re.compile(r"\b(?:word (?:doc|document|file)|\.docx|docx|spreadsheet|excel|"
+                        r"\.xlsx|presentation|slide ?deck|powerpoint|\.pptx)\b", re.I)
+FILE_NUDGE = ("(They asked for a FILE, not text in the chat. Create it now with the tool "
+              "(create_word_document / create_spreadsheet / create_presentation), with the "
+              "full content inside.)")
 INTENT_NUDGE = ("(You said you would do that, but you didn't call the tool. Call it now — "
                 "don't describe it.)")
 
@@ -356,6 +373,61 @@ EMPTY_NUDGE = ("(Your last reply was empty. Either call the tool that does what 
 EMPTY_FALLBACK = ("Sorry — I didn't manage to do that. Could you say it another way?")
 
 
+_THIS_TOOLS = ("read_document", "browser_read_page", "screen_read", "open_file")
+
+
+async def assemble(conversation_id: str, conv: dict, agent: agents.Agent,
+                   history: list[dict], user_content: str, memories: list[dict], ctx: dict,
+                   keep: int = toolpick.KEEP,
+                   this: str = "") -> tuple[list[dict], list[tools.Tool]]:
+    """The model's messages and tools for a turn. The opening — base system
+    prompt, then the core tools — is the same for every request and agent, so
+    Ollama keeps it cached; the agent's instructions, extra tools, history and
+    context come after it. Also used to warm that opening up (prefetch)."""
+    dyn = _dynamic_block(memories, ctx, this, agent.prompt)
+    llm_messages: list[dict] = [
+        {"role": "system", "content": _static_system_prompt()},
+        *_with_context(_history_to_llm(history), dyn),
+    ]
+    # Uploaded files ride along for the whole conversation (stable between
+    # uploads, so the cached prefix survives).
+    try:
+        from ..knowledge import attachments as attach
+        attach_block = attach.prompt_block(conversation_id)
+        if attach_block:
+            llm_messages.insert(1, {"role": "system", "content": attach_block})
+    except Exception:
+        pass
+
+    # Project memory: conversations assigned to a project carry everything
+    # Jarvis knows about that project.
+    if conv.get("project_id"):
+        project = db.get_project(conv["project_id"])
+        if project:
+            other = [c["title"] for c in db.conversations_in_project(project["id"])
+                     if c["id"] != conversation_id][:8]
+            block = (f"ACTIVE PROJECT: {project['name']}\n"
+                     f"Description: {project['description'] or '—'}\n"
+                     f"Project notes (accumulated knowledge):\n"
+                     f"{project['notes'][-6000:] or '(none yet)'}")
+            if other:
+                block += "\nOther conversations in this project: " + "; ".join(other)
+            block += ("\nWhen you learn something durable about this project "
+                      "(decisions, progress, preferences), save it with the "
+                      "project_remember tool.")
+            llm_messages.insert(1, {"role": "system", "content": block})
+
+    if not settings.get("tools.enabled", True):
+        return llm_messages, []
+    # Extra tools this message needs (every schema costs prompt tokens).
+    picked = await toolpick.select(user_content, _tools_for(agent), _recent_tools(history),
+                                   keep=keep)
+    if this:
+        # "Summarize this" / "email this": be able to read what "this" is.
+        picked += [x for n in _THIS_TOOLS if (x := tools.registry.get(n)) is not None]
+    return llm_messages, toolpick.arrange(picked)
+
+
 async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dict]:
     started = time.perf_counter()
     db.add_message(conversation_id, "user", user_content)
@@ -401,42 +473,15 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
             yield event
         return
 
-    llm_messages: list[dict] = [
-        {"role": "system", "content": _static_system_prompt(agent)},
-        *_with_context(_history_to_llm(history), _dynamic_block(memories, ctx)),
-    ]
-    # Uploaded files ride along for the whole conversation (stable between
-    # uploads, so the cached prefix survives).
-    try:
-        from ..knowledge import attachments as attach
-        attach_block = attach.prompt_block(conversation_id)
-        if attach_block:
-            llm_messages.insert(1, {"role": "system", "content": attach_block})
-    except Exception:
-        pass
-
-    # Project memory: conversations assigned to a project carry everything
-    # Jarvis knows about that project.
-    if conv.get("project_id"):
-        project = db.get_project(conv["project_id"])
-        if project:
-            other = [c["title"] for c in db.conversations_in_project(project["id"])
-                     if c["id"] != conversation_id][:8]
-            block = (f"ACTIVE PROJECT: {project['name']}\n"
-                     f"Description: {project['description'] or '—'}\n"
-                     f"Project notes (accumulated knowledge):\n"
-                     f"{project['notes'][-6000:] or '(none yet)'}")
-            if other:
-                block += "\nOther conversations in this project: " + "; ".join(other)
-            block += ("\nWhen you learn something durable about this project "
-                      "(decisions, progress, preferences), save it with the "
-                      "project_remember tool.")
-            llm_messages.insert(1, {"role": "system", "content": block})
-
-    use_tools = settings.get("tools.enabled", True)
-    tool_list = _for_intent(user_content, _tools_for(agent)) if use_tools else []
-    # Only the tools this message needs: every schema costs prompt tokens.
-    tool_list = await toolpick.select(user_content, tool_list, _recent_tools(history))
+    await prefetch.claim(conversation_id)   # a warm-up in flight: let it finish first
+    this = ""
+    if channels.current.get() is None and selection.mentions_this(user_content):
+        try:   # "email this to Sam": what is the user looking at?
+            this = await asyncio.wait_for(asyncio.to_thread(selection.describe), timeout=4)
+        except Exception:
+            this = ""
+    llm_messages, tool_list = await assemble(conversation_id, conv, agent, history,
+                                             user_content, memories, ctx, this=this)
     tool_schemas = [t.to_ollama() for t in tool_list] or None
 
     full_response = ""
@@ -493,6 +538,16 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                     llm_messages.append({"role": "user", "content": CLAIM_NUDGE})
                     full_response = ""
                     continue
+                if (tool_schemas and not intent_nudged and not tool_events
+                        and _WANTS_FILE.search(user_content)):
+                    # "Write a report as a Word document" answered with the
+                    # report as chat text: the file was the point.
+                    intent_nudged = True
+                    llm_messages.append({"role": "assistant", "content": round_text})
+                    llm_messages.append({"role": "user", "content": FILE_NUDGE})
+                    full_response = full_response[:len(full_response) - len(round_text)]
+                    yield {"type": "reset_text", "content": full_response}
+                    continue
                 if (tool_schemas and not intent_nudged and round_text.strip()
                         and _ASKS_ACTION.search(user_content) and _STALLS.search(round_text)
                         and not any(re.search(r"ask (?:the user )?which|several", e["result"], re.I)
@@ -526,7 +581,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
 
             for tc in tool_calls:
                 fn = tc.get("function", {})
-                name = fn.get("name", "")
+                name = _respect_intent(user_content, fn.get("name", ""))
                 args = fn.get("arguments") or {}
                 if isinstance(args, str):
                     try:
@@ -672,15 +727,16 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
         prior = "\n\n".join(f"Step {i + 1} result:\n{s}"
                             for i, s in enumerate(step_summaries))[-8000:] or "(first step)"
         step_messages: list[dict] = _with_context([
-            {"role": "system", "content": _static_system_prompt(agent)},
+            {"role": "system", "content": _static_system_prompt()},
             {"role": "user", "content":
+                f"{agent.prompt}\n\n"
                 f"OVERALL GOAL: {goal}\n\nPROGRESS SO FAR:\n{prior}\n\n"
                 f"CURRENT STEP ({index + 1}/{len(steps)}): {step}\n"
                 f"Complete only this step now."},
         ], _dynamic_block(memories, ctx))
         # The planner may use any tool, but each step only needs a few.
-        step_tools = await toolpick.select(step, tool_list,
-                                           {e["name"] for e in tool_events if e.get("name")})
+        step_tools = toolpick.arrange(await toolpick.select(
+            step, tool_list, {e["name"] for e in tool_events if e.get("name")}))
         schemas = [t.to_ollama() for t in step_tools] or None
         step_text = ""
         # The duplicate-call guard is per step: a later step may legitimately
@@ -789,6 +845,17 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
                   "(they can allow dangerous tools under Settings → Phone on the "
                   "Mac). Tell them it needs to be done at the Mac.")
         audit.log("tool_blocked_remote", tool=name, channel=channel.name)
+    elif t.needs_confirmation() and getattr(channel, "auto_approve", False):
+        # A routine the user set up: nobody is there to ask. Confirm-level
+        # tools (read mail, calendar, screen…) run; anything that always needs
+        # the user (sending email) or is dangerous does not.
+        if t.risk == "confirm" and not t.always_ask:
+            yield {"type": "tool_start", "name": name, "arguments": args}
+            output = await tools.execute(name, args)
+        else:
+            denied, denied_label = True, "Not allowed in routines"
+            output = (f"'{name}' needs the user's own approval, so routines can't use it. "
+                      "Say what you would have done instead.")
     elif t.needs_confirmation():
         pc = confirmations.create(name, args, t.risk)
         yield {"type": "confirm_request", "id": pc.id, "tool": name,

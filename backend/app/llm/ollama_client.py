@@ -143,6 +143,31 @@ async def chat_stream(messages: list[dict], model: str | None = None,
             f"Cannot reach Ollama at {_host()}. Is `ollama serve` running?") from e
 
 
+async def prefill(messages: list[dict], tools: list[dict] | None = None,
+                  model: str | None = None) -> dict:
+    """Have Ollama read a prompt (and cache it) without really answering:
+    the next request sharing this prefix only processes what's new. Same
+    options as chat_stream — a different num_ctx would reload the model."""
+    payload: dict[str, Any] = {
+        "model": model or settings.get("ollama.model"),
+        "messages": messages,
+        "stream": False,
+        "options": {**_options(tools=bool(tools)), "num_predict": 1},
+        "keep_alive": settings.get("ollama.keep_alive", "5m"),
+        "think": bool(settings.get("ollama.think", False)),
+    }
+    if tools:
+        payload["tools"] = tools
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(f"{_host()}/api/chat", json=payload)
+            data = r.json()
+            return {"prompt_tokens": data.get("prompt_eval_count", 0),
+                    "seconds": round(data.get("prompt_eval_duration", 0) / 1e9, 2)}
+    except (httpx.HTTPError, ValueError) as e:
+        return {"error": str(e)}
+
+
 async def chat_once(messages: list[dict], model: str | None = None,
                     format: str | dict | None = None) -> str:
     """Non-streamed helper for internal calls (titles, self-analysis...).

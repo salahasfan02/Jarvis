@@ -16,8 +16,18 @@ import re
 from ..llm import ollama_client
 from ..tools import base as tools
 
-KEEP = 10            # tools offered per request
-SMALL_ENOUGH = 12    # agents with this few tools keep them all
+KEEP = EXTRAS = 4    # extra tools per request, on top of the core set
+
+# Offered on EVERY request, first and always in this order: with the base
+# system prompt they form one shared prompt opening that Ollama keeps cached
+# across all agents, so a request only pays for its extra tools and words.
+CORE = ("open_app", "quit_app", "open_file", "browser_open", "browser_tabs",
+        "browser_close_tab", "browser_click", "youtube_play", "youtube_control",
+        "music_play", "music_control", "list_directory", "search_files",
+        "read_document", "send_email", "draft_email", "read_emails",
+        "calendar_events", "create_reminder", "create_note", "screen_read",
+        "screen_look", "camera_look", "web_search", "remember",
+        "create_word_document", "ui_press")
 
 _card_vectors: dict[str, list[float]] = {}
 
@@ -57,6 +67,10 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     "powerpoint": ("create_presentation",),
     "contact": ("find_person", "remember_person"),
     "remember": ("remember", "remember_person"),
+    "every": ("create_routine",), "routine": ("create_routine", "list_routines", "change_routine"),
+    "minutes before": ("create_routine",), "each morning": ("create_routine",),
+    "tell me when": ("create_routine", "watch_screen"), "let me know when": ("create_routine", "watch_screen"),
+    "arrives": ("create_routine",),
 }
 
 
@@ -82,21 +96,32 @@ async def _vector(t: tools.Tool) -> list[float] | None:
 
 
 async def select(user_content: str, tool_list: list[tools.Tool],
-                 recent: set[str] | None = None, keep: int = KEEP) -> list[tools.Tool]:
-    """The tools worth offering for this message (registry order kept)."""
-    if len(tool_list) <= SMALL_ENOUGH:
-        return tool_list
+                 recent: set[str] | None = None, keep: int = EXTRAS) -> list[tools.Tool]:
+    """Extra (non-core) tools worth offering for this message, registry order.
+    The core tools are always offered on top (see arrange)."""
+    candidates = [t for t in tool_list if t.name not in CORE]
+    if not candidates:
+        return []
     query = await ollama_client.embed(user_content[:400])
     if not query:
-        return tool_list   # no embedding model: offer everything, as before
+        return candidates   # no embedding model: offer everything, as before
     scores: dict[str, float] = {}
-    for t in tool_list:
+    for t in candidates:
         v = await _vector(t)
         scores[t.name] = _cos(query, v) if v else 0.0
     chosen = {name for name, _ in sorted(scores.items(), key=lambda kv: -kv[1])[:keep]}
     lower = user_content.lower()
-    for word, names in _KEYWORDS.items():
+    names = {t.name for t in candidates}
+    for word, wanted in _KEYWORDS.items():
         if re.search(rf"\b{re.escape(word)}", lower):
-            chosen.update(names)
-    chosen.update(recent or set())
-    return [t for t in tool_list if t.name in chosen]
+            chosen.update(n for n in wanted if n in names)
+    chosen.update(n for n in (recent or set()) if n in names)
+    return [t for t in candidates if t.name in chosen]
+
+
+def arrange(picked: list[tools.Tool]) -> list[tools.Tool]:
+    """Core tools (fixed order) followed by this request's extras."""
+    core = [t for name in CORE if (t := tools.registry.get(name)) is not None
+            and not t.is_blocked()]
+    names = {t.name for t in core}
+    return core + [t for t in picked if t.name not in names]
