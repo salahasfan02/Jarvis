@@ -81,7 +81,17 @@ def forget() -> None:
 # --- connecting --------------------------------------------------------------------------
 
 def _kind(dev) -> str:
-    return str(getattr(getattr(dev, "device_type", None), "value", "")).lower()
+    kind = str(getattr(getattr(dev, "device_type", None), "value", "")).lower()
+    if kind not in ("", "unknown"):
+        return kind
+    # A Tapo device only knows its type once signed in; until then go by the
+    # family it announces (SMART.TAPOBULB, SMART.IPCAMERA, …).
+    family = str(getattr(getattr(getattr(getattr(dev, "config", None), "connection_type", None),
+                                 "device_family", None), "value", "")).upper()
+    for word, k in (("BULB", "bulb"), ("PLUG", "plug"), ("SWITCH", "wallswitch")):
+        if word in family:
+            return k
+    return "unknown"
 
 
 async def connect_account(email: str, password: str, timeout: int = 6) -> list[dict]:
@@ -90,7 +100,7 @@ async def connect_account(email: str, password: str, timeout: int = 6) -> list[d
     from kasa import AuthenticationError, Credentials, Discover
     creds = Credentials(email.strip(), password)
     found = await Discover.discover(credentials=creds, timeout=timeout)
-    lights, rejected = [], 0
+    lights, rejected, failed = [], 0, []
     for host, dev in found.items():
         if _kind(dev) not in LIGHT_TYPES:
             continue                                   # cameras, hubs, vacuums…
@@ -99,15 +109,29 @@ async def connect_account(email: str, password: str, timeout: int = 6) -> list[d
         except AuthenticationError:
             rejected += 1
             continue
-        except Exception:
+        except Exception as e:
+            failed.append(f"{dev.model or host}: {e}")
             continue
+        if _kind(dev) not in LIGHT_TYPES:
+            continue                                   # signed in, and it isn't a light after all
         config = dev.config.to_dict_control_credentials(credentials_hash=dev.credentials_hash)
         lights.append({"id": dev.mac, "name": dev.alias or dev.model, "model": dev.model,
                        "kind": _kind(dev), "host": host, "config": config})
         _devices[dev.mac] = dev
+    for dev in found.values():
+        if dev not in _devices.values():
+            try:
+                await dev.disconnect()       # don't leave a connection open to each one skipped
+            except Exception:
+                pass
     if not lights:
         if rejected:
-            raise LightsError("Tapo didn't accept that email and password (both are case-sensitive).")
+            raise LightsError(
+                "Your light didn't accept that Tapo email and password (both are case-sensitive). "
+                "If they're right, turn on Third-Party Compatibility in the Tapo app "
+                "(Me → Tapo Lab, or Me → Third-Party Services) and try again.")
+        if failed:
+            raise LightsError("Found your light but couldn't connect — " + "; ".join(failed))
         raise LightsError("No Tapo or Kasa lights answered on this Wi-Fi network.")
     _save({"lights": lights, "connected_at": time.time()})
     return [_public(x) for x in lights]

@@ -39,8 +39,9 @@ class FakeLight:
 
 
 class FakeConfig:
-    def __init__(self, host):
+    def __init__(self, host, family="SMART.TAPOBULB"):
         self.host = host
+        self.connection_type = type("C", (), {"device_family": FakeKind(family)})()
 
     def to_dict_control_credentials(self, credentials_hash=None, exclude_credentials=False):
         return {"host": self.host, "credentials_hash": credentials_hash,
@@ -55,17 +56,24 @@ class FakeKind:
 class FakeBulb:
     instances: dict[str, "FakeBulb"] = {}
 
-    def __init__(self, host, mac="AA:BB:CC:00:00:01", alias="Bedroom", kind="bulb", password_ok=True):
+    def __init__(self, host, mac="AA:BB:CC:00:00:01", alias="Bedroom", kind="bulb",
+                 family="SMART.TAPOBULB", password_ok=True):
         self.host, self.mac, self.alias, self.model = host, mac, alias, "L530B"
-        self.device_type, self.config = FakeKind(kind), FakeConfig(host)
+        # Like a real Tapo device: its type is unknown until it's signed in to.
+        self.kind, self.device_type = kind, FakeKind("unknown")
+        self.config = FakeConfig(host, family)
         self.credentials_hash, self.is_on = "a2xhcC1oYXNo", True
         self.modules = {Module.Light: FakeLight()}
         self.password_ok = password_ok
+        self.error: Exception | None = None
         FakeBulb.instances[mac] = self
 
     async def update(self):
+        if self.error:
+            raise self.error
         if not self.password_ok:
             raise AuthenticationError("Device response did not match our challenge")
+        self.device_type = FakeKind(self.kind)
 
     async def turn_on(self):
         self.is_on = True
@@ -79,7 +87,10 @@ def home_network(monkeypatch):
     """One bulb and one camera on the Wi-Fi; Device.connect returns the bulb."""
     from kasa import Discover
     bulb = FakeBulb("192.168.0.48")
-    camera = FakeBulb("192.168.0.91", mac="CA:ME:RA", alias="Camera", kind="camera")
+    camera = FakeBulb("192.168.0.91", mac="CA:ME:RA", alias="Camera", kind="camera",
+                      family="SMART.IPCAMERA")
+    camera.device_type = FakeKind("camera")
+    camera.error = AssertionError("the camera must be left alone")
     network = {"192.168.0.48": bulb, "192.168.0.91": camera}
 
     async def discover(credentials=None, timeout=5, **kw):
@@ -106,9 +117,15 @@ def test_connecting_keeps_a_key_not_the_password(home_network):
 
 def test_a_wrong_password_says_so(home_network):
     home_network["192.168.0.48"].password_ok = False
-    with pytest.raises(lights.LightsError, match="didn't accept"):
+    with pytest.raises(lights.LightsError, match="didn't accept.*Third-Party Compatibility"):
         run(lights.connect_account("me@example.com", "wrong"))
     assert not lights.configured()
+
+
+def test_a_light_that_wont_connect_says_why(home_network):
+    home_network["192.168.0.48"].error = OSError("Connection reset by peer")
+    with pytest.raises(lights.LightsError, match="Found your light.*Connection reset"):
+        run(lights.connect_account("me@example.com", "pw"))
 
 
 def test_on_off_brightness_colour_and_warmth(home_network):

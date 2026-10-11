@@ -519,6 +519,37 @@ def test_yes_no_and_speakable():
     assert spoken == "Done. See the doc."
 
 
+def test_sending_an_answer_to_the_phone_doesnt_say_it_all_again():
+    from app.chat.service import _restates
+    earlier = "It's 16°C and cloudy in London, with light rain likely from 6pm."
+    assert _restates("I've sent you the weather update for today: 16°C and cloudy in London, "
+                     "with light rain likely from 6pm. [1]  \nSources: [1] Weather briefing", earlier)
+    assert not _restates("Sent to your phone on Telegram.", earlier)
+    assert not _restates("Done — I sent it to your phone. Want me to set a rain reminder "
+                         "for 5pm so you remember an umbrella?", earlier)
+
+
+def test_after_sending_the_answer_it_isnt_repeated_in_the_chat(env, monkeypatch):
+    from app import db
+    from app.chat import service
+    _fake, _make_bot, script = env
+    monkeypatch.setattr(registry.get("send_to_phone"), "handler",
+                        lambda **k: "Sent to your phone on Telegram.")
+    script(tool("send_to_phone", {"what": "last_answer"}),
+           answer("I've sent you the weather update for today: 16°C and cloudy in London, "
+                  "with light rain likely from 6pm. [1]\nSources: [1] Weather briefing"))
+    conv = db.create_conversation()["id"]
+    db.add_message(conv, "user", "what's the weather today")
+    db.add_message(conv, "assistant", "It's 16°C and cloudy in London, with light rain likely from 6pm.")
+
+    async def main():
+        async for ev in service.run_chat(conv, "could you send the weather you just gave me to my phone"):
+            if ev["type"] == "done":
+                return ev["content"]
+
+    assert run(main()) == "Sent to your phone on Telegram."
+
+
 # --- doing what it says ------------------------------------------------------------------
 
 def _doc(tmp_path, name="MCP Servers.docx"):

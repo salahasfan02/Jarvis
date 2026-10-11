@@ -448,6 +448,17 @@ def _narration(sentence: str) -> bool:
 _STRUCTURE = re.compile(r"^\s*(?:[-*•|]|\d+[.)]\s|```)", re.M)
 
 
+def _restates(reply: str, earlier: str) -> bool:
+    """'I've sent you the weather: 16°C and cloudy in London…' — mostly the
+    earlier answer again, rather than a word about sending it."""
+    words = re.findall(r"[a-z0-9°]+", reply.lower())
+    said = re.findall(r"[a-z0-9°]+", earlier.lower())
+    if len(words) < 8 or len(said) < 5:
+        return False
+    runs = {tuple(said[i:i + 5]) for i in range(len(said) - 4)}
+    return sum(tuple(words[i:i + 5]) in runs for i in range(len(words) - 4)) >= 2   # ~6 words copied
+
+
 def _without_lead_ins(text: str, lead_ins: list[str], final: str = "") -> str:
     """What the model said between its tool calls ("Sure, I'll send them now",
     "I've sent you both…") loses its narration — the final round reports the
@@ -1010,6 +1021,17 @@ async def run_chat(conversation_id: str, user_content: str,
         full_response = full_response.rstrip()[:len(full_response.rstrip()) - len(final_text.strip())].rstrip()
         full_response = (full_response + "\n\n" if full_response else "") + honest
         final_text = honest
+    sent = [e for e in tool_events if e["name"] == "send_to_phone"
+            and (e.get("arguments") or {}).get("what", "last_answer") in ("last_answer", "conversation")
+            and e["result"].startswith("Sent")]
+    if sent and final_text.strip() and full_response.rstrip().endswith(final_text.strip()):
+        before = next((m["content"] for m in reversed(db.get_messages(conversation_id))
+                       if m["role"] == "assistant"), "")
+        if _restates(final_text, before):
+            # It's on their phone now — saying it all again here is the repetition.
+            full_response = full_response.rstrip()[:len(full_response.rstrip()) - len(final_text.strip())].rstrip()
+            full_response = (full_response + "\n\n" if full_response else "") + sent[-1]["result"]
+            final_text = sent[-1]["result"]
     tidy = _without_lead_ins(full_response, lead_ins, final_text)
     if not any(e["name"].startswith(_MAKES_FILE) for e in tool_events):
         tidy = _with_sources(tidy, sources)   # a document carries its own
