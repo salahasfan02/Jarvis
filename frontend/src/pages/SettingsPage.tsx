@@ -1,5 +1,39 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Gauge, ImagePlus, X } from "lucide-react";
+import {
+  Bot, Brain, Check, Cpu, Gauge, ImagePlus, KeyRound, Laptop, Mic, Palette, ShieldBan, Smartphone,
+  UserRound, X,
+} from "lucide-react";
+import { PageHeader } from "../components/ui";
+
+const SECTIONS = [
+  { id: "s-model", label: "AI models", icon: Cpu },
+  { id: "s-assistant", label: "Assistant", icon: Bot },
+  { id: "s-voice", label: "Voice", icon: Mic },
+  { id: "s-phone", label: "Phone", icon: Smartphone },
+  { id: "s-memory", label: "Memory", icon: Brain },
+  { id: "s-you", label: "About you", icon: UserRound },
+  { id: "s-offlimits", label: "Off-limits", icon: ShieldBan },
+  { id: "s-permissions", label: "Permissions", icon: KeyRound },
+  { id: "s-appearance", label: "Appearance", icon: Palette },
+  { id: "s-desktop", label: "Desktop app", icon: Laptop },
+];
+
+/** Which section is in view, for the menu on the left. */
+function useSectionSpy(rootRef: React.RefObject<HTMLDivElement>, ready: boolean) {
+  const [active, setActive] = useState(SECTIONS[0].id);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !ready) return;
+    const obs = new IntersectionObserver((entries) => {
+      const seen = entries.filter((e) => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (seen[0]) setActive(seen[0].target.id);
+    }, { root, rootMargin: "0px 0px -65% 0px" });
+    SECTIONS.forEach((sec) => { const el = document.getElementById(sec.id); if (el) obs.observe(el); });
+    return () => obs.disconnect();
+  }, [ready]);
+  return [active, setActive] as const;
+}
 import { API, api, OllamaModel, pullModel, statsApi } from "../lib/api";
 import { recordUtterance, VoiceDiag, voiceBus, voiceDiag } from "../lib/voice";
 
@@ -209,7 +243,7 @@ function PhonePanel(props: { onPatch: (patch: any) => void }) {
     : st.enabled ? "Connecting to Telegram…" : "Off — Jarvis isn't reading Telegram.";
 
   return (
-    <div className="panel">
+    <div className="panel" id="s-phone">
       <h3>Phone (Telegram)</h3>
       <div className="sub" style={{ marginBottom: 8 }}>
         Text or voice-message Jarvis from anywhere: “send me the PDF in my Downloads”,
@@ -289,11 +323,16 @@ export function SettingsPage(props: {
   onPatch: (patch: any) => void;
 }) {
   const s = props.settings;
+  const pageRef = useRef<HTMLDivElement>(null);
+  const [activeSection, setActiveSection] = useSectionSpy(pageRef, !!s);
   const [choosingPicture, setChoosingPicture] = useState(false);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [pullName, setPullName] = useState("");
   const [pullStatus, setPullStatus] = useState<{ text: string; pct: number } | null>(null);
   const [tools, setTools] = useState<any[]>([]);
+  const [toolQuery, setToolQuery] = useState("");
+  const [toolFilter, setToolFilter] = useState<"all" | "changed" | "asks">("all");
+  const [allTools, setAllTools] = useState(false);
   const [engines, setEngines] = useState<any[]>([]);
   const [kokoroVoices, setKokoroVoices] = useState<{ id: string; name: string }[]>([]);
   const [downloadStatus, setDownloadStatus] = useState<string>("");
@@ -442,11 +481,23 @@ export function SettingsPage(props: {
   };
 
   return (
-    <div className="page">
-      <div className="page-inner">
-        <h1>Settings</h1>
+    <div className="page" ref={pageRef}>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SECTIONS.map((sec) => (
+            <button key={sec.id} className={activeSection === sec.id ? "active" : ""}
+                    onClick={() => {
+                      setActiveSection(sec.id);
+                      document.getElementById(sec.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}>
+              <sec.icon /> {sec.label}
+            </button>
+          ))}
+        </nav>
+        <div className="settings-content">
+        <PageHeader title="Settings">Models, voice, your phone, privacy — and how Jarvis looks.</PageHeader>
 
-        <div className="panel">
+        <div className="panel" id="s-model">
           <h3>AI model</h3>
           <Row label="Active model" sub="Used for all conversations; switch anytime.">
             <select
@@ -545,7 +596,7 @@ export function SettingsPage(props: {
           </Row>
         </div>
 
-        <div className="panel">
+        <div className="panel" id="s-assistant">
           <h3>Assistant</h3>
           <Row label="Name">
             <input type="text" value={s.assistant.name}
@@ -564,7 +615,7 @@ export function SettingsPage(props: {
           </Row>
         </div>
 
-        <div className="panel">
+        <div className="panel" id="s-voice">
           <h3>Voice</h3>
           <Row label="Voice input" sub="Microphone button & wake word">
             <Toggle checked={s.voice.enabled}
@@ -669,7 +720,7 @@ export function SettingsPage(props: {
 
         <PhonePanel onPatch={props.onPatch} />
 
-        <div className="panel">
+        <div className="panel" id="s-memory">
           <h3>Memory</h3>
           <Row label="Long-term memory" sub="Recall saved facts in every conversation">
             <Toggle checked={s.memory.enabled}
@@ -713,9 +764,8 @@ export function SettingsPage(props: {
           </Row>
         </div>
 
-        <LoginItem />
 
-        <div className="panel">
+        <div className="panel" id="s-you">
           <h3>About you</h3>
           <div className="sub" style={{ marginBottom: 8 }}>
             Used to fill in forms (“fill this in with my details”) and sign emails. Stored only
@@ -735,7 +785,7 @@ export function SettingsPage(props: {
           ))}
         </div>
 
-        <div className="panel">
+        <div className="panel" id="s-offlimits">
           <h3>Off-limits for screen control</h3>
           <Row label="Apps" sub="Jarvis never presses, types or clicks in these (comma-separated)">
             <textarea className="search" rows={2} style={{ width: 340 }}
@@ -751,16 +801,39 @@ export function SettingsPage(props: {
           </Row>
         </div>
 
-        <div className="panel">
+        <div className="panel" id="s-permissions">
           <h3>Tool permissions</h3>
           <Row label="Tools enabled" sub="Let the assistant use tools at all">
             <Toggle checked={s.tools.enabled}
                     onChange={(v) => props.onPatch({ tools: { enabled: v } })} />
           </Row>
-          {tools.map((t) => (
-            <Row key={t.name} label={t.name} sub={t.description.slice(0, 90)}>
+          <p className="desc" style={{ marginTop: 12 }}>
+            What Jarvis may do without asking. Sending email and anything risky always asks.
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+            <input className="field" style={{ flex: 1 }} placeholder={`Search ${tools.length} tools…`}
+                   aria-label="Search tools" value={toolQuery} onChange={(e) => setToolQuery(e.target.value)} />
+            <div className="seg">
+              {([["all", "All"], ["asks", "Asks first"], ["changed", "Changed"]] as const).map(([k, label]) => (
+                <button key={k} className={toolFilter === k ? "active" : ""} onClick={() => setToolFilter(k)}>{label}</button>
+              ))}
+            </div>
+          </div>
+          {(() => {
+            const q = toolQuery.trim().toLowerCase();
+            const shown = tools.filter((t) =>
+              (!q || t.name.includes(q.replace(/ /g, "_")) || t.description.toLowerCase().includes(q))
+              && (toolFilter === "all" || (toolFilter === "changed" ? t.permission !== "default"
+                  : t.risk !== "safe" || t.always_ask)));
+            const limited = allTools || q ? shown : shown.slice(0, 8);
+            return (
+              <>
+                {shown.length === 0 && <div className="sub" style={{ padding: "12px 0" }}>No tools match.</div>}
+                {limited.map((t) => (
+            <Row key={t.name} label={t.name.replace(/_/g, " ").replace(/^./, (c: string) => c.toUpperCase())}
+                 sub={t.description.slice(0, 110)}>
               {t.risk === "dangerous" || t.always_ask ? (
-                <span className="sub" style={{ color: "var(--danger)" }}>always asks</span>
+                <span className="badge warn">Always asks</span>
               ) : (
                 <select
                   value={t.permission}
@@ -773,10 +846,17 @@ export function SettingsPage(props: {
                 </select>
               )}
             </Row>
-          ))}
+                ))}
+                {!q && shown.length > limited.length && (
+                  <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setAllTools(true)}>
+                    Show all {shown.length} tools</button>
+                )}
+              </>
+            );
+          })()}
         </div>
 
-        <div className="panel">
+        <div className="panel" id="s-appearance">
           <h3>Appearance</h3>
           <Row label="Theme" sub="Color scheme for the whole app">
             <select value={s.ui.theme}
@@ -846,6 +926,8 @@ export function SettingsPage(props: {
             <Toggle checked={s.ui.glass}
                     onChange={(v) => props.onPatch({ ui: { glass: v } })} />
           </Row>
+        </div>
+        <LoginItem />
         </div>
       </div>
     </div>
@@ -936,7 +1018,7 @@ function LoginItem() {
   useEffect(() => { bridge?.loginItem?.().then(setState).catch(() => {}); }, []);
   if (!bridge?.loginItem || !state?.packaged) return null;
   return (
-    <div className="panel">
+    <div className="panel" id="s-desktop">
       <h3>Desktop app</h3>
       <Row label="Open Jarvis when I log in" sub="Starts quietly in the background, ready for “Jarvis…”.">
         <Toggle checked={state.enabled}

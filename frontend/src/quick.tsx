@@ -7,7 +7,7 @@ import ReactDOM from "react-dom/client";
 import ReactMarkdown from "react-markdown";
 import "./styles/global.css";
 
-const API = "http://127.0.0.1:8765/api";
+import { API } from "./lib/api";
 
 function Quick() {
   const [question, setQuestion] = useState("");

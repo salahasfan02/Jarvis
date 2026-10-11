@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { AlarmClock, Pause, Pencil, Play, Plus, Trash2, Zap } from "lucide-react";
 import { API } from "../lib/api";
+import { EmptyState, PageHeader, toast } from "../components/ui";
+import { timeAgo } from "../lib/format";
 
 interface Routine {
   id: string;
@@ -76,6 +78,7 @@ export function RoutinesPage() {
   const remove = async (r: Routine) => {
     if (!confirm(`Delete “${r.name}”?`)) return;
     await fetch(`${API}/routines/${r.id}`, { method: "DELETE" });
+    toast("Routine deleted");
     load();
   };
   const runNow = async (r: Routine) => {
@@ -92,18 +95,13 @@ export function RoutinesPage() {
   return (
     <div className="page">
       <div className="page-inner">
-        <h1>Routines</h1>
-        <div className="sub" style={{ marginTop: -8 }}>
-          Things Jarvis does on its own. Just ask — <i>“every weekday at 8 send me my briefing
-          on Telegram”</i>, <i>“tell me when an email from my landlord arrives”</i>,
-          <i> “remind me 10 minutes before meetings”</i>.
-        </div>
+        <PageHeader title="Routines"
+                    actions={!form && <button className="btn primary" onClick={() => { setForm({ ...EMPTY }); setFormError(""); }}>
+                      <Plus /> New routine</button>}>
+          Things Jarvis does on its own. Or just ask — “every weekday at 8 send me my briefing on
+          Telegram”, “tell me when an email from my landlord arrives”.
+        </PageHeader>
 
-        {!form && (
-          <div><button className="btn primary" onClick={() => { setForm({ ...EMPTY }); setFormError(""); }}>
-            <Plus /> New routine
-          </button></div>
-        )}
 
         {form && (
           <div className="panel routine-form">
@@ -165,48 +163,51 @@ export function RoutinesPage() {
               </select>
             </label>
             {formError && <div className="sub" style={{ color: "var(--danger)" }}>{formError}</div>}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn primary" onClick={save}>Save</button>
-              <button className="btn" onClick={() => setForm(null)}>Cancel</button>
+            <div className="form-actions">
+              <button className="btn ghost" onClick={() => setForm(null)}>Cancel</button>
+              <button className="btn primary" onClick={save}>{form.id ? "Save changes" : "Create routine"}</button>
             </div>
           </div>
         )}
 
-        {items && items.length === 0 && (
-          <div className="panel" style={{ textAlign: "center", color: "var(--text-dim)", padding: 32 }}>
-            <AlarmClock className="empty-icon" />
-            <div style={{ marginTop: 8 }}>No routines yet — ask Jarvis to set one up.</div>
-          </div>
-        )}
-
-        {items?.map((r) => (
-          <div key={r.id} className="panel" style={{ display: "flex", gap: 12, alignItems: "center",
-                                                      opacity: r.enabled ? 1 : 0.55 }}>
-            <AlarmClock style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600 }}>{r.name}{!r.enabled && " (paused)"}</div>
-              <div className="sub">
-                {r.summary}{r.action ? <> → {r.action}</> : null} · {DELIVER[r.deliver] ?? r.deliver}
-                {r.last_fired ? <> · last ran {new Date(r.last_fired * 1000).toLocaleString()}</> : null}
+        <div className="panel">
+          {items === null && <div className="sub">Loading…</div>}
+          {items && items.length === 0 && (
+            <EmptyState icon={AlarmClock} title="No routines yet"
+                        action={<button className="btn" onClick={() => { setForm({ ...EMPTY }); setFormError(""); }}><Plus /> New routine</button>}>
+              Ask Jarvis to set one up, or create one here.
+            </EmptyState>
+          )}
+          {items?.map((r) => (
+            <div key={r.id} className="list-row" style={{ opacity: r.enabled ? 1 : 0.55 }}>
+              <div className="tile-icon"><AlarmClock /></div>
+              <div className="grow">
+                <div className="title">{r.name}{!r.enabled && <span className="badge" style={{ marginLeft: 8 }}>Paused</span>}</div>
+                <div className="meta">
+                  {r.summary}{r.action ? <> → {r.action}</> : null} · {DELIVER[r.deliver] ?? r.deliver}
+                </div>
+                {r.last_fired ? <div className="meta muted">Last ran {timeAgo(r.last_fired)}</div> : null}
+              </div>
+              <div className="actions">
+                <button className="icon-btn" title="Edit" aria-label="Edit" onClick={() => { setForm(toForm(r)); setFormError(""); }}>
+                  <Pencil />
+                </button>
+                <button className="icon-btn" title="Run now" aria-label="Run now" disabled={busy === r.id} onClick={() => runNow(r)}>
+                  {busy === r.id ? <span className="spinner" /> : <Zap />}
+                </button>
+                <button className="icon-btn" title={r.enabled ? "Pause" : "Resume"} aria-label={r.enabled ? "Pause" : "Resume"} onClick={() => toggle(r)}>
+                  {r.enabled ? <Pause /> : <Play />}
+                </button>
+                <button className="icon-btn" title="Delete" aria-label="Delete" onClick={() => remove(r)}><Trash2 /></button>
               </div>
             </div>
-            <button className="icon-btn" title="Edit" onClick={() => { setForm(toForm(r)); setFormError(""); }}>
-              <Pencil />
-            </button>
-            <button className="icon-btn" title="Run now" disabled={busy === r.id} onClick={() => runNow(r)}>
-              <Zap />
-            </button>
-            <button className="icon-btn" title={r.enabled ? "Pause" : "Resume"} onClick={() => toggle(r)}>
-              {r.enabled ? <Pause /> : <Play />}
-            </button>
-            <button className="icon-btn" title="Delete" onClick={() => remove(r)}><Trash2 /></button>
-          </div>
-        ))}
+          ))}
+        </div>
 
         {result && (
-          <div className="panel" style={{ whiteSpace: "pre-wrap", fontSize: 14 }}>
-            <div className="sub" style={{ marginBottom: 6 }}>{result.name} — just now</div>
-            {result.text}
+          <div className="panel">
+            <div className="panel-head"><h3><Zap className="icon-sm" /> {result.name}</h3><span className="sub">just now</span></div>
+            <div className="answer-card">{result.text}</div>
           </div>
         )}
       </div>

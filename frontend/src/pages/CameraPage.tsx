@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Play, Square } from "lucide-react";
 import { API } from "../lib/api";
+import { PageHeader } from "../components/ui";
 import { speak } from "../lib/voice";
 import { cameraBus, deliverFrame, framesWanted } from "../lib/camera";
 
@@ -121,19 +122,18 @@ export function CameraPage({ speakReplies, jarvisReply }: {
   return (
     <div className="page">
       <div className="page-inner">
-        <h1>Camera Vision</h1>
-        <div className="sub" style={{ marginTop: -8 }}>
-          Turn the camera on and ask about what Jarvis sees. Uses your local
-          vision model — nothing is uploaded.
-        </div>
+        <PageHeader title="Camera">
+          Show Jarvis something and ask about it. Uses your local vision model — nothing is uploaded.
+        </PageHeader>
 
-        <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
-          <video ref={videoRef} autoPlay playsInline muted
-                 style={{ width: "100%", display: on ? "block" : "none", background: "#000" }} />
+        <div className="camera-frame">
+          <video ref={videoRef} autoPlay playsInline muted style={{ display: on ? "block" : "none" }} />
+          {on && <span className="live">LIVE</span>}
           {!on && (
-            <div style={{ padding: 40, textAlign: "center", color: "var(--text-dim)" }}>
-              <Camera className="empty-icon" />
-              <div style={{ marginTop: 8 }}>Camera is off</div>
+            <div className="empty">
+              <div className="icon-wrap"><Camera /></div>
+              <h4 style={{ color: "#e6e9ee" }}>Camera is off</h4>
+              <p>Turn it on, then ask “what is this?” or “read this label”.</p>
             </div>
           )}
         </div>
@@ -154,16 +154,16 @@ export function CameraPage({ speakReplies, jarvisReply }: {
         </div>
 
         {jarvisLooked && jarvisReply && (
-          <div className="panel" style={{ fontSize: 14.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-            <div className="sub" style={{ marginBottom: 6 }}>Jarvis</div>
-            {jarvisReply}
+          <div className="panel">
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Jarvis</div>
+            <div className="answer-card">{jarvisReply}</div>
           </div>
         )}
 
         {on && (
           <div className="panel">
             <div style={{ display: "flex", gap: 8 }}>
-              <input type="text" className="search" style={{ flex: 1 }}
+              <input type="text" className="field" style={{ flex: 1 }} aria-label="Question"
                      placeholder="Ask about what the camera sees… (e.g. what is this? read this label)"
                      value={question}
                      onChange={(e) => setQuestion(e.target.value)}
@@ -173,10 +173,7 @@ export function CameraPage({ speakReplies, jarvisReply }: {
               </button>
             </div>
             {answer && (
-              <div style={{ marginTop: 12, fontSize: 14.5, lineHeight: 1.55,
-                            color: "var(--text)", whiteSpace: "pre-wrap" }}>
-                {answer}
-              </div>
+              <div className="answer-card" style={{ marginTop: 14 }}>{answer}</div>
             )}
           </div>
         )}

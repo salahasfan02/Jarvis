@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowUp, Code, Ear, FileText, Image as ImageIcon, MessageSquare, Mic, Paperclip, Square, X,
+  ArrowUp, Bell, Code, Ear, FileText, Image as ImageIcon, MessageSquare, Mic, PanelLeft, Paperclip,
+  Plus, Square, Upload, X,
 } from "lucide-react";
-import { ChatView, ConfirmModal, ConfirmRequest, ToolChipInfo } from "./components/ChatView";
+import { AGENTS, ChatView, ConfirmModal, ConfirmRequest, ToolChipInfo } from "./components/ChatView";
 import { MatrixRain } from "./components/MatrixRain";
 import { WorldMap } from "./components/WorldMap";
 import { Page, Sidebar } from "./components/Sidebar";
+import { CommandPalette } from "./components/CommandPalette";
+import { Toasts, toast } from "./components/ui";
+import { inkFor } from "./lib/format";
 import { API, api, Attachment, Conversation, expandSkill, Message, Skill, skillsApi } from "./lib/api";
 import { enqueueSpeech, playWakeChime, prewarmPhrases, speechSupported, stopSpeaking, voiceBus, VoiceEngine, WhisperVoiceEngine } from "./lib/voice";
 
@@ -20,7 +24,7 @@ import { requestFrame } from "./lib/camera";
 import { CameraPage } from "./pages/CameraPage";
 import { RoutinesPage } from "./pages/RoutinesPage";
 import { ActivityPage } from "./pages/ActivityPage";
-import { SetupPage } from "./pages/SetupPage";
+import { countSetupProblems, SetupPage } from "./pages/SetupPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SkillsPage } from "./pages/SkillsPage";
@@ -33,7 +37,33 @@ export default function App() {
   const [page, setPage] = useState<Page>("core");
   const pageRef = useRef(page);
   pageRef.current = page;
-  const [collapsed, setCollapsed] = useState(false);
+  // The sidebar remembers being collapsed, and folds away on narrow windows.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("jarvis.sidebar") === "collapsed"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("jarvis.sidebar", collapsed ? "collapsed" : "open"); } catch { /* private */ }
+  }, [collapsed]);
+  const [narrow, setNarrow] = useState(() => window.innerWidth < 900);
+  useEffect(() => {
+    const on = () => setNarrow(window.innerWidth < 900);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  const [openWhileNarrow, setOpenWhileNarrow] = useState(false);
+  useEffect(() => { if (!narrow) setOpenWhileNarrow(false); }, [narrow]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [mode, setMode] = useState<"chat" | "code">("chat");
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -65,8 +95,7 @@ export default function App() {
   // once at start-up and shown as a banner on the Core screen.
   const [setupProblems, setSetupProblems] = useState(0);
   useEffect(() => {
-    fetch(`${API}/setup/check`).then((r) => r.json())
-      .then((r) => setSetupProblems(r.problems ?? 0)).catch(() => {});
+    if (page !== "setup") countSetupProblems().then(setSetupProblems).catch(() => {});
   }, [page === "setup"]);
   useEffect(() => {
     if (!announcement) return;
@@ -282,7 +311,8 @@ export default function App() {
           }
           break;
         case "agent":
-          setAgentName(e.agent.name);
+          // the same short label the saved message shows ("Research", "Files")
+          setAgentName(AGENTS[e.agent.id] ?? (["general", "quick"].includes(e.agent.id) ? null : e.agent.name));
           agentIdRef.current = e.agent.id;
           break;
         case "token":
@@ -500,12 +530,14 @@ export default function App() {
     const accent: string = settings?.ui?.accent ?? "";
     if (/^#[0-9a-fA-F]{6}$/.test(accent)) {
       root.style.setProperty("--accent", accent);
+      root.style.setProperty("--accent-ink", inkFor(accent));   // readable text on it
       const r = parseInt(accent.slice(1, 3), 16);
       const g = parseInt(accent.slice(3, 5), 16);
       const b = parseInt(accent.slice(5, 7), 16);
       root.style.setProperty("--core-rgb", `${r}, ${g}, ${b}`);
     } else {
       root.style.removeProperty("--accent");
+      root.style.removeProperty("--accent-ink");
       root.style.removeProperty("--core-rgb");
     }
 
@@ -551,7 +583,8 @@ export default function App() {
     api.deleteConversation(id).then(() => {
       refreshConversations();
       if (id === activeId) newChat();
-    });
+      toast("Chat deleted");
+    }).catch(() => toast("Couldn't delete that chat", "error"));
   };
 
   const editMessage = (m: Message) => {
@@ -598,6 +631,9 @@ export default function App() {
   });
 
   const voiceEnabled = settings?.voice?.enabled !== false && voice !== null;
+  const activeConv = conversations.find((c) => c.id === activeId);
+  const profile = settings?.profile ?? {};
+  const firstName: string = profile.first_name || (profile.full_name ?? "").split(" ")[0] || "";
 
   return (
     <>
@@ -616,44 +652,47 @@ export default function App() {
         busy={busy}
         ollamaUp={ollamaUp}
         model={settings?.ollama?.model ?? ""}
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed((c) => !c)}
+        assistantName={settings?.assistant?.name ?? "Jarvis"}
+        collapsed={narrow ? !openWhileNarrow : collapsed}
+        setupProblems={setupProblems}
+        onToggleCollapse={() => (narrow ? setOpenWhileNarrow((o) => !o) : setCollapsed((c) => !c))}
         onNewChat={newChat}
         onSelect={openConversation}
         onDelete={deleteConversation}
-        onSearch={(q) => refreshConversations(q)}
         onPage={setPage}
+        onOpenPalette={() => setPaletteOpen(true)}
       />
 
       <div className="main">
         {page === "chat" && (
           <div className="workspace"
+               onDragEnter={(e) => { if (e.dataTransfer.types.includes("Files")) setDragging(true); }}
                onDragOver={(e) => e.preventDefault()}
-               onDrop={(e) => { e.preventDefault(); uploadFiles(e.dataTransfer.files); }}>
+               onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
+               onDrop={(e) => { e.preventDefault(); setDragging(false); uploadFiles(e.dataTransfer.files); }}>
             <div className="workspace-header">
-              <div className="mode-toggle">
-                <button className={mode === "chat" ? "active" : ""}
+              <div className="conv-title">
+                {activeConv?.title ?? <span className="muted">New chat</span>}
+              </div>
+              <div className="seg" role="group" aria-label="Mode">
+                <button className={mode === "chat" ? "active" : ""} aria-pressed={mode === "chat"}
                         onClick={() => switchMode("chat")}><MessageSquare /> Chat</button>
-                <button className={mode === "code" ? "active" : ""}
+                <button className={mode === "code" ? "active" : ""} aria-pressed={mode === "code"}
                         onClick={() => switchMode("code")}><Code /> Code</button>
               </div>
-              {mode === "code" && (
-                <span className="workspace-hint">
-                  senior-engineer mode · code blocks are runnable
-                </span>
-              )}
-              <div style={{ flex: 1 }} />
               <select
                 className="project-select"
-                title="Assign this conversation to a project"
-                value={conversations.find((c) => c.id === activeId)?.project_id ?? ""}
+                title="Assign this chat to a project"
+                aria-label="Project"
+                value={activeConv?.project_id ?? ""}
                 onChange={(e) => assignProject(e.target.value)}
               >
                 <option value="">No project</option>
                 {projects.map((p) => (
-                  <option key={p.id} value={p.id}>Project: {p.name}</option>
+                  <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+              <button className="icon-btn" title="New chat" aria-label="New chat" onClick={newChat}><Plus /></button>
             </div>
             <ChatView
               messages={messages}
@@ -666,59 +705,37 @@ export default function App() {
               onCopy={(t) => navigator.clipboard.writeText(t)}
               onSuggestion={(s) => { lastInputWasVoice.current = false; send(s); }}
               assistantName={settings?.assistant?.name ?? "Jarvis"}
+              userName={firstName}
+              mode={mode}
             />
-            {(attachments.length > 0 || uploading) && (
-              <div className="attach-row">
-                {attachments.map((a) => (
-                  <span key={a.id} className="chip">
-                    {a.kind === "image" ? <ImageIcon /> : <FileText />} {a.name}
-                    <button className="chip-x" title="Remove"
-                            onClick={() => api.deleteAttachment(a.id)
-                              .then(() => refreshAttachments(activeIdRef.current))}>
-                      <X className="icon-sm" />
-                    </button>
-                  </span>
-                ))}
-                {uploading && <span className="chip">{uploading}</span>}
-              </div>
-            )}
             <div className="composer-wrap">
               <div className="composer">
-                <button className="icon-btn" title="Attach files or images"
-                        onClick={() => fileInputRef.current?.click()}>
-                  <Paperclip />
-                </button>
-                <input ref={fileInputRef} type="file" multiple style={{ display: "none" }}
-                       onChange={(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
-                {voiceEnabled && (
-                  <button
-                    className={`icon-btn ${voiceState === "listening" ? "recording" : ""}`}
-                    title="Push to talk"
-                    onClick={() => voiceState === "idle" ? voice?.startListening() : voice?.stop()}
-                  >
-                    <Mic />
-                  </button>
-                )}
-                {voiceEnabled && (
-                  <button
-                    className={`icon-btn ${voiceState === "waiting-wake" ? "wake-on" : ""}`}
-                    title={`Wake word ("${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}")`}
-                    onClick={() => voiceState === "waiting-wake" ? voice?.stop() : voice?.startWakeWord()}
-                  >
-                    <Ear />
-                  </button>
+                {(attachments.length > 0 || uploading) && (
+                  <div className="attach-row">
+                    {attachments.map((a) => (
+                      <span key={a.id} className="chip">
+                        {a.kind === "image" ? <ImageIcon className="icon-sm" /> : <FileText className="icon-sm" />} {a.name}
+                        <button className="chip-x" title="Remove" aria-label={`Remove ${a.name}`}
+                                onClick={() => api.deleteAttachment(a.id)
+                                  .then(() => refreshAttachments(activeIdRef.current))}>
+                          <X className="icon-sm" />
+                        </button>
+                      </span>
+                    ))}
+                    {uploading && <span className="chip"><span className="spinner" /> {uploading}</span>}
+                  </div>
                 )}
                 <textarea
                   ref={inputRef}
                   rows={1}
-                  placeholder={busy ? "Thinking…"
-                    : mode === "code" ? "Describe what to build, debug or refactor…"
+                  aria-label="Message"
+                  placeholder={mode === "code" ? "Describe what to build, debug or refactor…"
                     : `Message ${settings?.assistant?.name ?? "Jarvis"}…`}
                   value={input}
                   onChange={(e) => {
                     setInput(e.target.value);
                     e.target.style.height = "auto";
-                    e.target.style.height = Math.min(e.target.scrollHeight, 180) + "px";
+                    e.target.style.height = Math.min(e.target.scrollHeight, 220) + "px";
                   }}
                   onKeyDown={onComposerKey}
                   onPaste={(e) => {
@@ -729,24 +746,53 @@ export default function App() {
                     }
                   }}
                 />
-                {busy ? (
-                  <button className="icon-btn" title="Stop" onClick={() => socket.stop()}><Square /></button>
-                ) : (
-                  <button className="icon-btn primary" title="Send" disabled={!input.trim()}
-                          onClick={() => { lastInputWasVoice.current = false; send(input); }}><ArrowUp /></button>
-                )}
+                <div className="composer-row">
+                  <button className="icon-btn" title="Attach files or images" aria-label="Attach files"
+                          onClick={() => fileInputRef.current?.click()}>
+                    <Paperclip />
+                  </button>
+                  <input ref={fileInputRef} type="file" multiple style={{ display: "none" }}
+                         onChange={(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
+                  {voiceEnabled && (
+                    <button
+                      className={`icon-btn ${voiceState === "listening" ? "recording" : ""}`}
+                      title="Push to talk" aria-label="Push to talk"
+                      onClick={() => voiceState === "idle" ? voice?.startListening() : voice?.stop()}
+                    >
+                      <Mic />
+                    </button>
+                  )}
+                  {voiceEnabled && (
+                    <button
+                      className={`icon-btn ${voiceState === "waiting-wake" ? "wake-on" : ""}`}
+                      title={`Wake word (“${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}”)`}
+                      aria-label="Wake word" aria-pressed={voiceState === "waiting-wake"}
+                      onClick={() => voiceState === "waiting-wake" ? voice?.stop() : voice?.startWakeWord()}
+                    >
+                      <Ear />
+                    </button>
+                  )}
+                  <div className="grow" />
+                  {busy ? (
+                    <button className="icon-btn" title="Stop" aria-label="Stop" onClick={() => socket.stop()}><Square /></button>
+                  ) : (
+                    <button className="icon-btn primary" title="Send" aria-label="Send" disabled={!input.trim()}
+                            onClick={() => { lastInputWasVoice.current = false; send(input); }}><ArrowUp /></button>
+                  )}
+                </div>
               </div>
-              <div className="voice-hint">
-                {voiceState === "waiting-wake" && !interim && `Listening for "${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}"…`}
-                {(voiceState === "listening" || interim) && (interim || "Listening…")}
+              <div className="composer-hint">
+                <span className={voiceState !== "idle" || interim ? "live" : ""}>
+                  {voiceState === "waiting-wake" && !interim
+                    ? `Listening for “${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}”…`
+                    : (voiceState === "listening" || interim) ? (interim || "Listening…")
+                    : mode === "code" ? "Code mode — senior-engineer answers, runnable code blocks" : ""}
+                </span>
+                <span><kbd>Enter</kbd> to send · <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</span>
               </div>
             </div>
+            {dragging && <div className="drop-overlay"><Upload /> Drop files to attach</div>}
           </div>
-        )}
-        {page === "core" && setupProblems > 0 && (
-          <button className="setup-banner" onClick={() => setPage("setup")}>
-            Some things Jarvis needs aren't set up yet — open Setup check
-          </button>
         )}
         {page === "core" && (
           <DashboardPage
@@ -754,6 +800,10 @@ export default function App() {
             listening={voiceState === "listening"}
             assistantName={settings?.assistant?.name ?? "Jarvis"}
             onCommand={(text) => { lastInputWasVoice.current = false; send(text); }}
+            onStop={() => socket.stop()}
+            onOpenChat={() => (activeId ? openConversation(activeId) : setPage("chat"))}
+            setupProblems={setupProblems}
+            onOpenSetup={() => setPage("setup")}
             lastUser={[...messages].reverse().find((m) => m.role === "user")?.content ?? null}
             reply={busy ? streaming
                         : [...messages].reverse().find((m) => m.role === "assistant")?.content ?? null}
@@ -780,7 +830,7 @@ export default function App() {
         {page === "skills" && <SkillsPage />}
         {page === "routines" && <RoutinesPage />}
         {page === "activity" && <ActivityPage />}
-        {page === "setup" && <SetupPage onOpenSettings={() => setPage("settings")} />}
+        {page === "setup" && <SetupPage onOpenSettings={() => setPage("settings")} onProblems={setSetupProblems} />}
         {page === "camera" && (
           <CameraPage speakReplies={settings?.voice?.tts_enabled ?? false}
                       jarvisReply={busy ? streaming
@@ -820,7 +870,7 @@ export default function App() {
 
       {announcement && (
         <div className="announce" role="status" onClick={() => setAnnouncement(null)}>
-          <div className="announce-title">{announcement.title}</div>
+          <div className="announce-title"><Bell /> {announcement.title}</div>
           <div className="announce-text">{announcement.text}</div>
           {announcement.action && (
             <div className="announce-actions">
@@ -838,6 +888,29 @@ export default function App() {
           )}
         </div>
       )}
+      {paletteOpen && (
+        <CommandPalette
+          onClose={() => setPaletteOpen(false)}
+          conversations={conversations}
+          assistantName={settings?.assistant?.name ?? "Jarvis"}
+          onPage={setPage}
+          onOpenConversation={openConversation}
+          onAsk={(text) => {
+            lastInputWasVoice.current = false;
+            if (page === "core" || page === "chat") send(text);
+            else { newChat(); send(text, null); }
+          }}
+          actions={[
+            { id: "new", label: "New chat", icon: Plus, run: newChat },
+            { id: "code", label: "New code session", icon: Code, run: () => { newChat(); setMode("code"); } },
+            { id: "wake", label: voiceState === "waiting-wake" ? "Turn off the wake word" : "Turn on the wake word",
+              icon: Ear, run: toggleWake },
+            { id: "sidebar", label: collapsed ? "Expand the sidebar" : "Collapse the sidebar", icon: PanelLeft,
+              run: () => setCollapsed((c) => !c) },
+          ]}
+        />
+      )}
+      <Toasts />
       {confirm && (
         <ConfirmModal
           request={confirm}

@@ -12,4 +12,7 @@ class _QuietPolls(logging.Filter):
 
 if __name__ == "__main__":
     logging.getLogger("uvicorn.access").addFilter(_QuietPolls())
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8765, reload=False)
+    import os
+    # JARVIS_PORT runs a separate copy (tests, a sandbox) beside the real one.
+    uvicorn.run("app.main:app", host="127.0.0.1", port=int(os.environ.get("JARVIS_PORT", 8765)),
+                reload=False)

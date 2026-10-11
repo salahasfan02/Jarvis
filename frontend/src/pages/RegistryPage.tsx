@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Wand2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { PageHeader } from "../components/ui";
 import remarkGfm from "remark-gfm";
 import { Gap, gapsApi } from "../lib/api";
 
@@ -34,11 +35,10 @@ export function RegistryPage({ onFixIt }: { onFixIt?: (gap: Gap) => void }) {
   return (
     <div className="page">
       <div className="page-inner">
-        <h1>Missing Capabilities Registry</h1>
-        <div className="sub" style={{ marginTop: -8 }}>
-          Every request Jarvis couldn't fulfill is logged here automatically.
-          Repeats raise the priority: 1–3× low · 4–10× medium · 10+× high · 20+× critical.
-        </div>
+        <PageHeader title="Capabilities">
+          Things you asked for that Jarvis couldn't do yet, logged automatically. The more often
+          one comes up, the higher its priority — and “Fix it” starts building it.
+        </PageHeader>
 
         <div className="registry-stats">
           <div className="stat-tile"><b>{stats.total}</b><span>open gaps</span></div>
@@ -49,7 +49,7 @@ export function RegistryPage({ onFixIt }: { onFixIt?: (gap: Gap) => void }) {
 
         <div className="panel">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h3 style={{ margin: 0 }}>Weekly Capability Report</h3>
+            <h3 style={{ margin: 0 }}>Weekly report</h3>
             <div style={{ display: "flex", gap: 8 }}>
               {reports.slice(0, 3).map((r) => (
                 <button key={r.id} className="btn"

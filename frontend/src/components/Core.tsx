@@ -45,9 +45,12 @@ export function Core({ mode, design = "orb", size = 420, onClick }: {
     canvas.width = size * dpr;
     canvas.height = size * dpr;
     const ctx = canvas.getContext("2d")!;
-    ctx.scale(dpr, dpr);
-    const cx = size / 2;
-    const cy = size / 2;
+    // The designs are drawn on a 420px stage and scaled to fit, so a smaller
+    // core (next to a reply, in a small window) is the same picture, smaller.
+    const S = 420;
+    ctx.scale(dpr * (size / S), dpr * (size / S));
+    const cx = S / 2;
+    const cy = S / 2;
 
     const particles = Array.from({ length: 90 }, (_, i) => ({
       angle: (Math.PI * 2 * i) / 90 + Math.random(),
@@ -103,10 +106,10 @@ export function Core({ mode, design = "orb", size = 420, onClick }: {
 
     const waveform = (rgb: string, amp: number, speaking: boolean) => {
       if (!speaking) return;
-      const w = size * 0.5;
+      const w = S * 0.5;
       ctx.beginPath();
       for (let x = 0; x <= w; x += 4) {
-        const y = cy + size * 0.36 +
+        const y = cy + S * 0.36 +
           Math.sin(x * 0.09 + t * 0.25) * amp * 16 * Math.sin((x / w) * Math.PI);
         x === 0 ? ctx.moveTo(cx - w / 2 + x, y) : ctx.lineTo(cx - w / 2 + x, y);
       }
@@ -229,7 +232,7 @@ export function Core({ mode, design = "orb", size = 420, onClick }: {
       const amp = smoothing;
       const speedMul = m === "thinking" ? 4 : m === "listening" ? 2 : 1;
 
-      ctx.clearRect(0, 0, size, size);
+      ctx.clearRect(0, 0, S, S);
       switch (designRef.current) {
         case "reactor": drawReactor(rgb, amp, speedMul, speaking); break;
         case "halo": drawHalo(rgb, amp, speedMul, speaking); break;

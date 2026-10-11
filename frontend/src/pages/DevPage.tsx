@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Timer, X } from "lucide-react";
 import { API, api } from "../lib/api";
+import { PageHeader } from "../components/ui";
 
 export function DevPage() {
   const [tab, setTab] = useState<"audit" | "learned" | "tools" | "agents" | "plugins">("audit");
@@ -33,12 +34,14 @@ export function DevPage() {
   return (
     <div className="page">
       <div className="page-inner">
-        <h1>Developer</h1>
-        <div style={{ display: "flex", gap: 8 }}>
-          {(["audit", "learned", "tools", "agents", "plugins"] as const).map((t) => (
-            <button key={t} className={`btn ${tab === t ? "primary" : ""}`} onClick={() => setTab(t)}>
-              {t}
-            </button>
+        <PageHeader title="Developer">
+          Under the hood: every tool call, what Jarvis learned from its mistakes, its tools, agents and plugins.
+        </PageHeader>
+        <div className="tabs" role="tablist">
+          {([["audit", "Audit log"], ["learned", "Learned"], ["tools", "Tools"], ["agents", "Agents"],
+             ["plugins", "Plugins"]] as const).map(([t, label]) => (
+            <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "active" : ""}
+                    onClick={() => setTab(t)}>{label}</button>
           ))}
         </div>
 
@@ -135,7 +138,7 @@ export function DevPage() {
               </div>
             ))}
             <button className="btn" style={{ marginTop: 10 }}
-                    onClick={() => fetch("http://127.0.0.1:8765/api/plugins/reload", { method: "POST" }).then(refresh)}>
+                    onClick={() => fetch(`${API}/plugins/reload`, { method: "POST" }).then(refresh)}>
               Reload plugins
             </button>
           </div>

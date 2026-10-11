@@ -48,8 +48,9 @@ app = FastAPI(title="Jarvis", version="0.1.0", lifespan=lifespan)
 # Jarvis's own pages: the Vite dev server, and the built UI the backend serves
 # at /app (the desktop app loads that — never file://, whose "null" origin any
 # website can borrow with a sandboxed iframe).
+PORT = int(os.environ.get("JARVIS_PORT", 8765))
 UI_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173",
-              "http://localhost:8765", "http://127.0.0.1:8765"}
+              f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}"}
 
 
 class OriginGuard:

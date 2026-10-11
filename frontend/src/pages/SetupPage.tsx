@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, CircleAlert, CircleHelp, CircleMinus, RefreshCw, RotateCw } from "lucide-react";
+import { CheckCircle2, CircleAlert, CircleHelp, CircleMinus, Info, RefreshCw, RotateCw } from "lucide-react";
 import { API } from "../lib/api";
+import { PageHeader, Ring } from "../components/ui";
 
 interface Check {
   id: string; name: string; why: string; status: "ok" | "missing" | "ask" | "unknown" | "optional" | "restart";
@@ -8,12 +9,12 @@ interface Check {
 }
 
 const ICON = {
-  ok: <CheckCircle2 style={{ color: "var(--accent)" }} />,
+  ok: <CheckCircle2 style={{ color: "var(--ok)" }} />,
   missing: <CircleAlert style={{ color: "var(--danger)" }} />,
-  ask: <CircleAlert style={{ color: "#f5a623" }} />,
-  unknown: <CircleHelp style={{ color: "var(--text-dim)" }} />,
-  optional: <CircleMinus style={{ color: "var(--text-dim)" }} />,
-  restart: <RotateCw style={{ color: "#f5a623" }} />,
+  ask: <CircleAlert style={{ color: "var(--warn)" }} />,
+  unknown: <CircleHelp style={{ color: "var(--text-3)" }} />,
+  optional: <CircleMinus style={{ color: "var(--text-3)" }} />,
+  restart: <RotateCw style={{ color: "var(--warn)" }} />,
 };
 
 const needsYou = (c: Check) => c.status === "missing" || c.status === "ask" || c.status === "restart";
@@ -42,7 +43,18 @@ async function mediaCheck(kind: "camera" | "microphone"): Promise<Check> {
   };
 }
 
-export function SetupPage({ onOpenSettings }: { onOpenSettings: () => void }) {
+/** How many things need the user — the backend's checks plus this window's
+ *  microphone and camera — for the sidebar badge and the Core notice. */
+export async function countSetupProblems(): Promise<number> {
+  const res = await fetch(`${API}/setup/check`).then((r) => r.json()).catch(() => ({ checks: [] }));
+  const media = await Promise.all([mediaCheck("microphone"), mediaCheck("camera")]);
+  return [...(res.checks as Check[]), ...media].filter(needsYou).length;
+}
+
+export function SetupPage({ onOpenSettings, onProblems }: {
+  onOpenSettings: () => void;
+  onProblems?: (n: number) => void;   // keeps the sidebar badge in step
+}) {
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [grantTo, setGrantTo] = useState("");
   const [busy, setBusy] = useState("");
@@ -94,24 +106,41 @@ export function SetupPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   };
 
   const problems = (checks ?? []).filter(needsYou).length;
+  const ready = (checks ?? []).filter((c) => c.status === "ok").length;
+  const counted = (checks ?? []).filter((c) => c.status !== "optional" && c.status !== "unknown").length;
+  useEffect(() => { if (checks) onProblems?.(problems); }, [checks, problems]);
   const placed = new Set<string>();
 
   return (
     <div className="page">
       <div className="page-inner">
-        <h1>Setup check</h1>
-        <div className="sub" style={{ marginTop: -8, display: "flex", gap: 12, alignItems: "center" }}>
-          {checks === null ? "Checking…" : problems === 0
-            ? "Everything Jarvis needs is in place."
-            : `${problems} thing${problems > 1 ? "s" : ""} need${problems > 1 ? "" : "s"} your attention.`}
-          <button className="btn" onClick={() => { setChecks(null); load(); }}><RefreshCw /> Re-check</button>
+        <PageHeader title="Setup check"
+                    actions={<button className="btn" onClick={() => { setChecks(null); load(); }}>
+                      <RefreshCw /> Re-check</button>}>
+          Everything Jarvis needs from your Mac — permissions, models and voice — and a one-click fix for each.
+        </PageHeader>
+
+        <div className="panel setup-hero">
+          {checks ? <Ring done={ready} total={counted} /> : <Ring done={0} total={1} />}
+          <div>
+            <h3>{checks === null ? "Checking…" : problems === 0
+              ? "Everything Jarvis needs is in place"
+              : `${problems} thing${problems > 1 ? "s" : ""} need${problems > 1 ? "" : "s"} your attention`}</h3>
+            <p>{checks === null ? "Asking macOS and the AI engine…"
+              : problems === 0 ? "Jarvis can hear you, see the screen and control your apps."
+              : "Fix them below — each button opens the right place or asks macOS for you."}</p>
+          </div>
         </div>
+
         {grantTo && (
-          <div className="panel" style={{ fontSize: 14 }}>
-            macOS gives permissions to the app that started Jarvis — right now that's{" "}
-            <b>{grantTo}</b>. In System Settings, switch on <b>{grantTo}</b>
-            {grantTo !== "Jarvis" && <> (there's no “Jarvis” entry until Jarvis is installed as an
-              app: <code>cd desktop &amp;&amp; npm run install-app</code>)</>}.
+          <div className="panel grant-note">
+            <Info />
+            <div>
+              macOS gives permissions to the app that started Jarvis — right now that's <b>{grantTo}</b>.
+              In System Settings, switch on <b>{grantTo}</b>
+              {grantTo !== "Jarvis" && <> (there's no “Jarvis” entry until Jarvis is installed as an
+                app: <code>cd desktop &amp;&amp; npm run install-app</code>)</>}.
+            </div>
           </div>
         )}
         {checks && GROUPS.map(([title, belongs]) => {
@@ -125,14 +154,14 @@ export function SetupPage({ onOpenSettings }: { onOpenSettings: () => void }) {
                 <div key={c.id} className="setup-row">
                   {ICON[c.status]}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600 }}>{c.name}</div>
+                    <div className="name">{c.name}</div>
                     <div className="sub">For {c.why}.{c.detail ? ` ${c.detail}` : ""}</div>
-                    {notes[c.id] && <div className="sub" style={{ color: "var(--accent)" }}>{notes[c.id]}</div>}
+                    {notes[c.id] && <div className="sub" style={{ color: "var(--accent-text)", marginTop: 4 }}>{notes[c.id]}</div>}
                   </div>
                   {c.fix && (
-                    <button className={`btn ${needsYou(c) ? "primary" : ""}`}
+                    <button className={`btn sm ${needsYou(c) ? "primary" : ""}`}
                             disabled={busy === c.id} onClick={() => fix(c)}>
-                      {busy === c.id ? "…" : c.fix_label}
+                      {busy === c.id ? <span className="spinner" /> : c.fix_label}
                     </button>
                   )}
                 </div>

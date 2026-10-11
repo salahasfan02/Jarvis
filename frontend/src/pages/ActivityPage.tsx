@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { History, RotateCcw } from "lucide-react";
+import { History, RotateCcw, Undo2 } from "lucide-react";
 import { API } from "../lib/api";
+import { EmptyState, PageHeader, toast } from "../components/ui";
+import { stepLabel, timeAgo } from "../lib/format";
 
 interface Entry {
   id: string;
@@ -35,45 +37,44 @@ export function ActivityPage() {
   const undo = async (e: Entry) => {
     const res = await fetch(`${API}/activity/${e.id}/undo`, { method: "POST" }).then((r) => r.json());
     setNotes((n) => ({ ...n, [e.id]: res.result }));
+    const failed = /^(couldn't|no such|already|that one can't)/i.test(res.result ?? "");
+    toast(failed ? res.result : "Undone", failed ? "error" : "ok");
     load();
   };
 
   return (
     <div className="page">
       <div className="page-inner">
-        <h1>Activity</h1>
-        <div className="sub" style={{ marginTop: -8 }}>
-          What Jarvis did, newest first. Undo moves files back, restores overwritten or trashed
-          files, removes documents it created, and forgets what it saved. You can also just say
-          <i> “undo that”</i>.
-        </div>
-        {items && items.length === 0 && (
-          <div className="panel" style={{ textAlign: "center", color: "var(--text-dim)", padding: 32 }}>
-            <History className="empty-icon" />
-            <div style={{ marginTop: 8 }}>Nothing yet.</div>
-          </div>
-        )}
-        {items?.map((e) => (
-          <div key={e.id} className="panel" style={{ display: "flex", gap: 12, alignItems: "center",
-                                                      opacity: e.undone ? 0.5 : 1 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600 }}>
-                {e.tool.replace(/_/g, " ")}
-                <span className="sub" style={{ fontWeight: 400 }}>
-                  {" "}· {new Date(e.ts * 1000).toLocaleString()} · by {SOURCE[e.source] ?? e.source}
-                  {e.undone ? " · undone" : ""}
-                </span>
+        <PageHeader title="Activity">
+          What Jarvis did, newest first. Undo puts files back, restores what it overwrote or
+          binned, removes documents it made and forgets what it saved — or just say “undo that”.
+        </PageHeader>
+        <div className="panel">
+          {items === null && <div className="sub">Loading…</div>}
+          {items && items.length === 0 && (
+            <EmptyState icon={History} title="Nothing yet">
+              When Jarvis moves, creates, sends or saves something, it shows up here.
+            </EmptyState>
+          )}
+          {items?.map((e) => (
+            <div key={e.id} className="list-row" style={{ opacity: e.undone ? 0.5 : 1 }}>
+              <div className="tile-icon">{e.undone ? <Undo2 /> : <History />}</div>
+              <div className="grow">
+                <div className="title">{stepLabel(e.tool, true)}{e.undone ? " · undone" : ""}</div>
+                <div className="meta" title={summary(e) || e.result}>
+                  {summary(e) || e.result.slice(0, 140)}
+                </div>
+                <div className="meta muted">
+                  {timeAgo(e.ts)} · by {SOURCE[e.source] ?? e.source}
+                </div>
+                {notes[e.id] && <div className="sub" style={{ color: "var(--accent-text)" }}>{notes[e.id]}</div>}
               </div>
-              <div className="sub" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {summary(e) || e.result.slice(0, 140)}
-              </div>
-              {notes[e.id] && <div className="sub" style={{ color: "var(--accent)" }}>{notes[e.id]}</div>}
+              {e.can_undo && (
+                <button className="btn sm" onClick={() => undo(e)}><RotateCcw /> Undo</button>
+              )}
             </div>
-            {e.can_undo && (
-              <button className="btn" onClick={() => undo(e)}><RotateCcw /> Undo</button>
-            )}
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );
