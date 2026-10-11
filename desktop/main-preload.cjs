@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld("jarvisWindow", {
   toggleZoom: () => ipcRenderer.send("window-drag", "zoom"),
   // "Open Jarvis when I log in": pass true/false to change, nothing to read.
   loginItem: (enabled) => ipcRenderer.invoke("login-item", enabled),
+  // Quit and reopen Jarvis (and its backend) so new macOS permissions apply.
+  relaunch: () => ipcRenderer.invoke("relaunch"),
 });

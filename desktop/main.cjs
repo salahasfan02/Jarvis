@@ -305,6 +305,20 @@ ipcMain.handle("login-item", (_e, enabled) => {
   return { packaged: app.isPackaged, enabled: app.getLoginItemSettings().openAtLogin };
 });
 
+// Restart Jarvis and its backend: macOS often hands a new permission (Screen
+// Recording, sometimes Accessibility) only to a freshly started process.
+ipcMain.handle("relaunch", async () => {
+  if (backendProc && backendProc.exitCode === null) {
+    // Wait for it to let go of the port, or the new copy would reuse it.
+    const exited = new Promise((resolve) => backendProc.once("exit", resolve));
+    backendProc.kill();
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))]);
+    backendProc = null;
+  }
+  app.relaunch();
+  app.quit();
+});
+
 app.whenReady().then(() => {
   ensureOllama();
   startBackend();

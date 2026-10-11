@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, CircleAlert, CircleHelp, CircleMinus, RefreshCw } from "lucide-react";
+import { CheckCircle2, CircleAlert, CircleHelp, CircleMinus, RefreshCw, RotateCw } from "lucide-react";
 import { API } from "../lib/api";
 
 interface Check {
-  id: string; name: string; why: string; status: "ok" | "missing" | "ask" | "unknown" | "optional";
+  id: string; name: string; why: string; status: "ok" | "missing" | "ask" | "unknown" | "optional" | "restart";
   detail: string; fix: string; fix_label: string;
 }
 
@@ -13,7 +13,10 @@ const ICON = {
   ask: <CircleAlert style={{ color: "#f5a623" }} />,
   unknown: <CircleHelp style={{ color: "var(--text-dim)" }} />,
   optional: <CircleMinus style={{ color: "var(--text-dim)" }} />,
+  restart: <RotateCw style={{ color: "#f5a623" }} />,
 };
+
+const needsYou = (c: Check) => c.status === "missing" || c.status === "ask" || c.status === "restart";
 
 const GROUPS: [string, (c: Check) => boolean][] = [
   ["Essentials", (c) => ["ollama", "accessibility", "screen", "whisper", "camera", "microphone"].includes(c.id)
@@ -58,6 +61,12 @@ export function SetupPage({ onOpenSettings }: { onOpenSettings: () => void }) {
     let note = "";
     try {
       if (c.fix === "settings_page") { onOpenSettings(); return; }
+      if (c.fix === "restart") {
+        const bridge = (window as any).jarvisWindow;
+        if (bridge?.relaunch) { await bridge.relaunch(); return; }
+        note = "Quit Jarvis and open it again.";
+        return;
+      }
       if (c.fix === "media_test") {
         const stream = await navigator.mediaDevices.getUserMedia(
           c.id === "camera" ? { video: true } : { audio: true });
@@ -84,7 +93,7 @@ export function SetupPage({ onOpenSettings }: { onOpenSettings: () => void }) {
     }
   };
 
-  const problems = (checks ?? []).filter((c) => c.status === "missing" || c.status === "ask").length;
+  const problems = (checks ?? []).filter(needsYou).length;
   const placed = new Set<string>();
 
   return (
@@ -121,7 +130,7 @@ export function SetupPage({ onOpenSettings }: { onOpenSettings: () => void }) {
                     {notes[c.id] && <div className="sub" style={{ color: "var(--accent)" }}>{notes[c.id]}</div>}
                   </div>
                   {c.fix && (
-                    <button className={`btn ${c.status === "missing" || c.status === "ask" ? "primary" : ""}`}
+                    <button className={`btn ${needsYou(c) ? "primary" : ""}`}
                             disabled={busy === c.id} onClick={() => fix(c)}>
                       {busy === c.id ? "…" : c.fix_label}
                     </button>

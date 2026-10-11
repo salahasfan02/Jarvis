@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import json
 import struct
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -125,28 +127,55 @@ def _item(cid: str, name: str, why: str, status: str, detail: str = "",
             "fix": fix, "fix_label": fix_label}
 
 
-def _accessibility() -> dict:
+_FRESH = ("import json, ApplicationServices as AS, Quartz;"
+          "print(json.dumps([bool(AS.AXIsProcessTrusted()),"
+          " bool(Quartz.CGPreflightScreenCaptureAccess())]))")
+
+
+def _fresh_grants() -> tuple[bool, bool] | None:
+    """(accessibility, screen) as a brand-new process sees them. Started by the
+    backend it counts as the same app to macOS, but has no stale answer: a grant
+    often reaches an already-running process only after it restarts."""
+    try:
+        out = subprocess.run([sys.executable, "-c", _FRESH], capture_output=True,
+                             text=True, timeout=20).stdout
+        ax, screen = json.loads(out.strip().splitlines()[-1])
+        return bool(ax), bool(screen)
+    except Exception:
+        return None
+
+
+def _grant(cid: str, name: str, why: str, now: bool, fresh: bool | None, missing: str) -> dict:
+    if now:
+        return _item(cid, name, why, "ok")
+    if fresh:
+        return _item(cid, name, why, "restart",
+                     "It's switched on — Jarvis starts using it after a restart.",
+                     "restart", "Restart Jarvis")
+    return _item(cid, name, why, "missing",
+                 f"{missing} Already switched on? Select Jarvis in that list, remove it "
+                 "with −, then press Allow again.", "prompt", "Allow")
+
+
+def _accessibility(fresh: bool | None = None) -> dict:
     try:
         import ApplicationServices as AS
         ok = bool(AS.AXIsProcessTrusted())
     except Exception:
         ok = False
-    return _item("accessibility", "Accessibility", "pressing buttons, typing, scrolling, "
-                 "reading what's selected", "ok" if ok else "missing",
-                 "" if ok else "Jarvis can't press, type or click anything yet.",
-                 "" if ok else "prompt", "Allow")
+    return _grant("accessibility", "Accessibility", "pressing buttons, typing, scrolling, "
+                  "reading what's selected", ok, fresh,
+                  "Jarvis can't press, type or click anything yet.")
 
 
-def _screen() -> dict:
+def _screen(fresh: bool | None = None) -> dict:
     try:
         import Quartz
         ok = bool(Quartz.CGPreflightScreenCaptureAccess())
     except Exception:
         ok = False
-    return _item("screen", "Screen Recording", "reading your screen, finding things to "
-                 "click, screen memory", "ok" if ok else "missing",
-                 "" if ok else "Jarvis can't see the screen yet.",
-                 "" if ok else "prompt", "Allow")
+    return _grant("screen", "Screen Recording", "reading your screen, finding things to "
+                  "click, screen memory", ok, fresh, "Jarvis can't see the screen yet.")
 
 
 def _calendar() -> dict:
@@ -287,10 +316,11 @@ def _phone() -> dict:
 
 async def run_all() -> dict:
     checks = await _models()
-    system = await asyncio.to_thread(lambda: [_accessibility(), _screen(), _calendar(),
-                                              _full_disk(), *_automation()])
+    fresh = await asyncio.to_thread(_fresh_grants) or (None, None)
+    system = await asyncio.to_thread(lambda: [_accessibility(fresh[0]), _screen(fresh[1]),
+                                              _calendar(), _full_disk(), *_automation()])
     checks += system + await asyncio.to_thread(_voice) + [_phone()]
-    problems = sum(c["status"] in ("missing", "ask") for c in checks)
+    problems = sum(c["status"] in ("missing", "ask", "restart") for c in checks)
     owner = await asyncio.to_thread(responsible_app)
     return {"checks": checks, "problems": problems, "checked_at": time.time(), "grant_to": owner}
 

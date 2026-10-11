@@ -17,8 +17,27 @@ def test_setup_check_reports_every_area(monkeypatch):
     ollama = next(c for c in result["checks"] if c["id"] == "ollama")
     assert ollama["status"] == "missing" and ollama["fix"] == "start"
     for c in result["checks"]:
-        assert c["status"] in ("ok", "missing", "ask", "unknown", "optional")
+        assert c["status"] in ("ok", "missing", "ask", "unknown", "optional", "restart")
         assert c["why"]
+
+
+def test_a_grant_the_backend_cant_see_yet_asks_for_a_restart(monkeypatch):
+    import ApplicationServices as AS
+    import Quartz
+    monkeypatch.setattr(AS, "AXIsProcessTrusted", lambda: False)
+    monkeypatch.setattr(Quartz, "CGPreflightScreenCaptureAccess", lambda: False)
+    # Switched on, but only a freshly started process sees it.
+    ax = setup_check._accessibility(fresh=True)
+    assert ax["status"] == "restart" and ax["fix"] == "restart"
+    # Not switched on anywhere (or switched on for an older build): ask again.
+    screen = setup_check._screen(fresh=False)
+    assert screen["status"] == "missing" and screen["fix"] == "prompt"
+    assert "remove it" in screen["detail"]
+
+
+def test_fresh_grants_come_from_a_new_process():
+    grants = setup_check._fresh_grants()
+    assert grants is None or (len(grants) == 2 and all(isinstance(g, bool) for g in grants))
 
 
 def test_images_are_shrunk_before_the_vision_model():
