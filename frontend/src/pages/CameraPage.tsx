@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Play, Square } from "lucide-react";
 import { API } from "../lib/api";
+import { PageHeader } from "../components/ui";
 import { speak } from "../lib/voice";
+import { cameraBus, deliverFrame, framesWanted } from "../lib/camera";
 
 /** Live camera vision: keeps the webcam on, and answers questions about what
  *  it sees using the configured vision model (llava). */
-export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
+export function CameraPage({ speakReplies, jarvisReply }: {
+  speakReplies: boolean;
+  jarvisReply?: string | null;   // Jarvis's answer after it looked (voice/chat request)
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [on, setOn] = useState(false);
   const [err, setErr] = useState("");
@@ -15,16 +20,20 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
   const [auto, setAuto] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const autoTimer = useRef<any>(null);
+  const [jarvisLooked, setJarvisLooked] = useState(false);
 
-  const start = async () => {
+  const start = async (): Promise<boolean> => {
     setErr("");
+    if (streamRef.current?.active) return true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
       setOn(true);
+      return true;
     } catch (e: any) {
       setErr("Couldn't open the camera — allow camera access. " + e.message);
+      return false;
     }
   };
 
@@ -36,6 +45,26 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
   };
 
   useEffect(() => () => stop(), []);
+
+  // Jarvis asked to look (voice/chat): turn the camera on, let it adjust
+  // exposure for a moment, then hand over a photo.
+  useEffect(() => {
+    const serve = async () => {
+      if (!framesWanted()) return;
+      if (!(await start())) { deliverFrame(null, "camera access was refused"); return; }
+      let frame: string | null = null;
+      for (let i = 0; i < 40 && !frame; i++) {   // up to ~4 s for the first frame
+        await new Promise((r) => setTimeout(r, 100));
+        frame = captureFrame();
+      }
+      if (frame) await new Promise((r) => setTimeout(r, 700));   // auto-exposure settles
+      setJarvisLooked(true);
+      deliverFrame(captureFrame() ?? frame, "the camera didn't produce a picture");
+    };
+    serve();
+    cameraBus.addEventListener("frame-wanted", serve);
+    return () => cameraBus.removeEventListener("frame-wanted", serve);
+  }, []);
 
   const captureFrame = (): string | null => {
     const v = videoRef.current;
@@ -93,19 +122,18 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
   return (
     <div className="page">
       <div className="page-inner">
-        <h1>Camera Vision</h1>
-        <div className="sub" style={{ marginTop: -8 }}>
-          Turn the camera on and ask about what Jarvis sees. Uses your local
-          vision model — nothing is uploaded.
-        </div>
+        <PageHeader title="Camera">
+          Show Jarvis something and ask about it. Uses your local vision model — nothing is uploaded.
+        </PageHeader>
 
-        <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
-          <video ref={videoRef} autoPlay playsInline muted
-                 style={{ width: "100%", display: on ? "block" : "none", background: "#000" }} />
+        <div className="camera-frame">
+          <video ref={videoRef} autoPlay playsInline muted style={{ display: on ? "block" : "none" }} />
+          {on && <span className="live">LIVE</span>}
           {!on && (
-            <div style={{ padding: 40, textAlign: "center", color: "var(--text-dim)" }}>
-              <Camera className="empty-icon" />
-              <div style={{ marginTop: 8 }}>Camera is off</div>
+            <div className="empty">
+              <div className="icon-wrap"><Camera /></div>
+              <h4 style={{ color: "#e6e9ee" }}>Camera is off</h4>
+              <p>Turn it on, then ask “what is this?” or “read this label”.</p>
             </div>
           )}
         </div>
@@ -114,7 +142,7 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
 
         <div style={{ display: "flex", gap: 8 }}>
           {!on ? (
-            <button className="btn primary" onClick={start}><Camera /> Turn camera on</button>
+            <button className="btn primary" onClick={() => start()}><Camera /> Turn camera on</button>
           ) : (
             <>
               <button className="btn danger" onClick={stop}>Turn off</button>
@@ -125,10 +153,17 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
           )}
         </div>
 
+        {jarvisLooked && jarvisReply && (
+          <div className="panel">
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Jarvis</div>
+            <div className="answer-card">{jarvisReply}</div>
+          </div>
+        )}
+
         {on && (
           <div className="panel">
             <div style={{ display: "flex", gap: 8 }}>
-              <input type="text" className="search" style={{ flex: 1 }}
+              <input type="text" className="field" style={{ flex: 1 }} aria-label="Question"
                      placeholder="Ask about what the camera sees… (e.g. what is this? read this label)"
                      value={question}
                      onChange={(e) => setQuestion(e.target.value)}
@@ -138,10 +173,7 @@ export function CameraPage({ speakReplies }: { speakReplies: boolean }) {
               </button>
             </div>
             {answer && (
-              <div style={{ marginTop: 12, fontSize: 14.5, lineHeight: 1.55,
-                            color: "var(--text)", whiteSpace: "pre-wrap" }}>
-                {answer}
-              </div>
+              <div className="answer-card" style={{ marginTop: 14 }}>{answer}</div>
             )}
           </div>
         )}

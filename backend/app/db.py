@@ -119,6 +119,12 @@ def init_db() -> None:
             conn.execute("ALTER TABLE conversations ADD COLUMN project_id TEXT")
         except sqlite3.OperationalError:
             pass
+        for column in ("summary TEXT NOT NULL DEFAULT ''",
+                       "summary_upto INTEGER NOT NULL DEFAULT 0"):
+            try:   # long conversations: older turns folded into a summary
+                conn.execute(f"ALTER TABLE conversations ADD COLUMN {column}")
+            except sqlite3.OperationalError:
+                pass
 
 
 # --- conversations -----------------------------------------------------------
@@ -328,6 +334,12 @@ def add_message(conv_id: str, role: str, content: str, meta: dict | None = None)
             (msg["id"], conv_id, role, content, json.dumps(msg["meta"]), now))
         conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conv_id))
     return msg
+
+
+def set_summary(conv_id: str, summary: str, upto: int) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE conversations SET summary=?, summary_upto=? WHERE id=?",
+                     (summary, upto, conv_id))
 
 
 def get_messages(conv_id: str) -> list[dict]:

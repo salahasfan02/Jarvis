@@ -98,6 +98,14 @@ class ScriptedLLM:
             name, args = rest
             yield {"message": {"content": "", "tool_calls": [
                 {"function": {"name": name, "arguments": args}}]}, "done": True}
+        elif kind == "multi":    # several tool calls in one round
+            yield {"message": {"content": "", "tool_calls": [
+                {"function": {"name": n, "arguments": a}} for n, a in rest[0]]}, "done": True}
+        elif kind == "both":     # words, then a tool call, in the same round
+            text, name, args = rest
+            yield {"message": {"content": text}, "done": False}
+            yield {"message": {"content": "", "tool_calls": [
+                {"function": {"name": name, "arguments": args}}]}, "done": True}
         else:
             yield {"message": {"content": rest[0]}, "done": True}
 
@@ -108,6 +116,10 @@ def tool(name, args):
 
 def answer(text):
     return lambda msgs: ("text", text)
+
+
+def say_then(text, name, args):
+    return lambda msgs: ("both", text, name, args)
 
 
 def last_tool_output(messages) -> str:
@@ -214,7 +226,15 @@ def test_research_into_a_word_doc_sent_to_the_phone(env):
     fake, make_bot, script = env
     report = ("## Top picks\n- **Lectric XP** — $999\n- Aventon Pace — $1,399\n\n"
               "## Sources\n- [Review](https://example.com/review)")
+    async def fake_research(question, depth="quick"):
+        return ("Web research for: budget e-bikes\n\n[1] Review — example.com\n"
+                "https://example.com/review\n> Lectric XP costs $999.")
+
+    registry_research = registry.get("research")
+    original = registry_research.handler
+    registry_research.handler = fake_research
     llm = script(
+        tool("research", {"question": "budget e-bikes", "depth": "deep"}),
         tool("create_word_document", {"title": "Budget e-bikes", "content": report}),
         lambda msgs: ("tool", "send_file",
                       {"path": last_tool_output(msgs).split(" at ")[1].split(". If")[0]}),
@@ -224,26 +244,25 @@ def test_research_into_a_word_doc_sent_to_the_phone(env):
     async def main():
         bot = make_bot()
         await bot.handle(message("research budget e-bikes and send me a word doc"))
-        await until(lambda: any("reply_markup" in m for m in fake.sent("sendMessage")))
-        ask = next(m for m in fake.sent("sendMessage") if "reply_markup" in m)
-        assert "send_file" in ask["text"]
-        allow = ask["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
-        await bot.handle(button(allow))
         await until(lambda: any("e-bike report" in t for t in fake.texts()))
         await bot.stop()
 
-    run(main())
+    try:
+        run(main())
+    finally:
+        registry_research.handler = original
 
     # every phone turn gets the remote kit, whatever agent was routed
     assert {"send_file", "search_files", "create_word_document",
-            "web_search"} <= set(llm.rounds[0]["tools"])
+            "research"} <= set(llm.rounds[0]["tools"])
+    # they asked for it to be sent, from the phone it goes to: no second question
+    assert not any("reply_markup" in m for m in fake.sent("sendMessage"))
     docs = fake.sent("sendDocument")
     assert len(docs) == 1
     name, data = docs[0]["_files"]["document"]
     assert name.endswith(".docx")
     body = "\n".join(p.text for p in docx.Document(io.BytesIO(data)).paragraphs)
     assert "Lectric XP — $999" in body and "Budget e-bikes" in body
-    assert any(p.get("text") == "✅ Allowed: send_file" for p in fake.sent("editMessageText"))
     final = fake.sent("sendMessage")[-1]
     assert final["parse_mode"] == "HTML" and "<b>e-bike report</b>" in final["text"]
 
@@ -256,7 +275,7 @@ def test_send_me_a_file_from_the_mac_confirmed_by_typing_yes(env, tmp_path):
 
     async def main():
         bot = make_bot()
-        await bot.handle(message("send me my lease pdf"))
+        await bot.handle(message("I need my lease pdf on here"))   # not "send": it asks
         await until(lambda: any("reply_markup" in m for m in fake.sent("sendMessage")))
         await bot.handle(message("yes"))
         await until(lambda: "Sent your lease." in fake.texts())
@@ -275,7 +294,7 @@ def test_new_message_while_asked_counts_as_no(env, tmp_path):
 
     async def main():
         bot = make_bot()
-        await bot.handle(message("send me a.txt"))
+        await bot.handle(message("can I have a.txt"))
         await until(lambda: any("reply_markup" in m for m in fake.sent("sendMessage")))
         await bot.handle(message("actually what time is it"))
         await until(lambda: "It's 3pm." in fake.texts())
@@ -421,7 +440,7 @@ def test_a_spoken_yes_approves_the_open_question(env, monkeypatch, tmp_path):
 
     async def main():
         bot = make_bot()
-        await bot.handle(message("send me notes.txt"))
+        await bot.handle(message("notes.txt please"))
         await until(lambda: any("reply_markup" in m for m in fake.sent("sendMessage")))
         await bot.handle(message(voice={"file_id": "V2", "duration": 1}))
         await until(lambda: "Sent." in fake.texts())
@@ -433,7 +452,7 @@ def test_a_spoken_yes_approves_the_open_question(env, monkeypatch, tmp_path):
 
 def test_an_empty_model_reply_is_retried_not_reported_as_done(env):
     fake, make_bot, script = env
-    script(answer(""), answer(""))
+    script(answer(""), answer(""), answer(""))   # pushed to send, then to say anything
 
     async def main():
         bot = make_bot()
@@ -498,3 +517,478 @@ def test_yes_no_and_speakable():
     assert tg._yes_no("no, send the pdf version instead") is None
     spoken = tg._speakable("**Done.** See [the doc](https://x.y).\n\nSources:\n- https://x.y")
     assert spoken == "Done. See the doc."
+
+
+def test_sending_an_answer_to_the_phone_doesnt_say_it_all_again():
+    from app.chat.service import _restates
+    earlier = "It's 16°C and cloudy in London, with light rain likely from 6pm."
+    assert _restates("I've sent you the weather update for today: 16°C and cloudy in London, "
+                     "with light rain likely from 6pm. [1]  \nSources: [1] Weather briefing", earlier)
+    assert not _restates("Sent to your phone on Telegram.", earlier)
+    assert not _restates("Done — I sent it to your phone. Want me to set a rain reminder "
+                         "for 5pm so you remember an umbrella?", earlier)
+
+
+def test_after_sending_the_answer_it_isnt_repeated_in_the_chat(env, monkeypatch):
+    from app import db
+    from app.chat import service
+    _fake, _make_bot, script = env
+    monkeypatch.setattr(registry.get("send_to_phone"), "handler",
+                        lambda **k: "Sent to your phone on Telegram.")
+    script(tool("send_to_phone", {"what": "last_answer"}),
+           answer("I've sent you the weather update for today: 16°C and cloudy in London, "
+                  "with light rain likely from 6pm. [1]\nSources: [1] Weather briefing"))
+    conv = db.create_conversation()["id"]
+    db.add_message(conv, "user", "what's the weather today")
+    db.add_message(conv, "assistant", "It's 16°C and cloudy in London, with light rain likely from 6pm.")
+
+    async def main():
+        async for ev in service.run_chat(conv, "could you send the weather you just gave me to my phone"):
+            if ev["type"] == "done":
+                return ev["content"]
+
+    assert run(main()) == "Sent to your phone on Telegram."
+
+
+# --- doing what it says ------------------------------------------------------------------
+
+def _doc(tmp_path, name="MCP Servers.docx"):
+    f = tmp_path / name
+    f.write_bytes(b"PK fake docx")
+    return f
+
+
+def test_a_promise_to_send_is_kept_and_not_repeated(env, tmp_path, monkeypatch):
+    """'Write a doc… then send it to me': it made the doc, then only SAID it
+    would send it. It's pushed to do it, and the promise leaves the reply."""
+    fake, make_bot, script = env
+    doc = _doc(tmp_path)
+    monkeypatch.setattr(registry.get("create_word_document"), "handler",
+                        lambda **k: f"Created Word document 'MCP Servers' at {doc}.")
+    async def fake_research(question, depth="quick"):
+        return "Web research for: mcp\n\n[1] MCP — mcp.io\nhttps://mcp.io\n> MCP is a protocol."
+
+    monkeypatch.setattr(registry.get("research"), "handler", fake_research)
+    llm = script(
+        tool("research", {"question": "mcp servers", "depth": "deep"}),
+        say_then("Sure, I'll write that now. Give me a moment.", "create_word_document",
+                 {"title": "MCP Servers", "content": "# MCP"}),
+        answer("I've created the document. I'll send it to your phone now."),
+        tool("send_file", {"path": str(doc)}),
+        answer("It's on its way."),
+    )
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("write a word document about mcp servers then send it to me"))
+        await until(lambda: any("on its way" in t for t in fake.texts()))
+        await bot.stop()
+
+    run(main())
+    assert fake.sent("sendDocument")[0]["_files"]["document"][0] == "MCP Servers.docx"
+    final = fake.texts()[-1]
+    assert "I'll send it" not in final and "Give me a moment" not in final
+    assert "created the document" in final
+    assert "send_file" in llm.rounds[3]["tools"]
+
+
+def test_claiming_a_send_that_never_happened_is_caught(env, tmp_path, monkeypatch):
+    """Listing files, then 'I've sent you the latest 3 files' — nothing sent."""
+    fake, make_bot, script = env
+    shot = _doc(tmp_path, "Screenshot.png")
+    monkeypatch.setattr(registry.get("list_directory"), "handler",
+                        lambda **k: f"{tmp_path} (1 item, newest first):\n2026-10-11 15:03  Screenshot.png")
+    llm = script(
+        tool("list_directory", {"path": str(tmp_path), "sort": "recent"}),
+        answer("I've sent you the latest file. It should arrive shortly."),
+        tool("send_file", {"path": str(shot)}),
+        answer("Sent your latest screenshot."),
+    )
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("send me the latest file on my desktop"))
+        await until(lambda: "Sent your latest screenshot." in fake.texts())
+        await bot.stop()
+
+    run(main())
+    assert len(fake.sent("sendDocument")) == 1
+    assert "none of the tools" in llm.rounds[2]["messages"][-1]["content"]
+    assert not any("should arrive" in t for t in fake.texts())
+    # listed only to find the file: the 'list' isn't dumped into the chat
+    assert not any("```" in t or "<pre" in t for t in fake.texts())
+
+
+def test_a_promise_never_kept_is_admitted(env, tmp_path, monkeypatch):
+    fake, make_bot, script = env
+    doc = _doc(tmp_path)
+    monkeypatch.setattr(registry.get("create_word_document"), "handler",
+                        lambda **k: f"Created Word document 'MCP' at {doc}.")
+    script(tool("create_word_document", {"title": "MCP", "content": "x"}),
+           answer("Done. I'll send it to you right away."),
+           answer(""))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("make a word doc with my shopping list and send it to me"))
+        await until(lambda: any("didn't manage" in t for t in fake.texts()))
+        await bot.stop()
+
+    run(main())
+    assert fake.sent("sendDocument") == []
+    assert "I'll send it" not in fake.texts()[-1]
+
+
+def test_researched_answers_come_with_sources(env, monkeypatch):
+    fake, make_bot, script = env
+    digest = ("Web research for: what is an mcp server\n\n"
+              "[1] What is MCP — modelcontextprotocol.io, 2026-07-28\n"
+              "https://modelcontextprotocol.io/intro\n> MCP is an open standard.\n\n"
+              "[2] MCP servers — example.com\nhttps://example.com/mcp\n> Servers expose tools.")
+
+    async def fake_research(question, depth="quick"):
+        return digest
+
+    monkeypatch.setattr(registry.get("research"), "handler", fake_research)
+    llm = script(tool("research", {"question": "what is an mcp server"}),
+                 answer("An MCP server exposes tools to AI apps [2] using an open standard [1]."
+                        "\n\nSources: [1] What is MCP, [2] MCP servers"))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("what is an mcp server"))
+        await until(lambda: any("open standard" in t for t in fake.texts()))
+        await bot.stop()
+
+    run(main())
+    assert "research" in llm.rounds[0]["tools"]
+    final = fake.texts()[-1]
+    assert "https://modelcontextprotocol.io/intro" in final and "https://example.com/mcp" in final
+    assert final.count("Sources") == 1      # its link-less list was replaced, not doubled
+
+
+def test_a_document_written_from_research_lists_its_sources(env, monkeypatch):
+    fake, make_bot, script = env
+    written = {}
+
+    async def fake_research(question, depth="quick"):
+        return "Web research for: x\n\n[1] MCP intro — mcp.io\nhttps://mcp.io/intro\n> MCP is a protocol."
+
+    monkeypatch.setattr(registry.get("research"), "handler", fake_research)
+    monkeypatch.setattr(registry.get("create_word_document"), "handler",
+                        lambda **k: written.update(k) or "Created Word document 'MCP' at /tmp/mcp.docx.")
+    script(tool("research", {"question": "mcp servers", "depth": "deep"}),
+           tool("create_word_document", {"title": "MCP", "content": "# MCP\nMCP is a protocol."}),
+           answer("Your document is ready."))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("research mcp servers and write a word document about it"))
+        await until(lambda: "Your document is ready." in fake.texts())
+        await bot.stop()
+
+    run(main())
+    assert "## Sources" in written["content"] and "https://mcp.io/intro" in written["content"]
+
+
+
+def test_a_message_cut_off_by_a_restart_is_offered_back(env, monkeypatch):
+    fake, make_bot, script = env
+    started = asyncio.Event()
+
+    async def hangs(messages, model=None, tools=None):
+        started.set()
+        await asyncio.Event().wait()     # Jarvis quits before this answers
+        yield {}
+
+    async def first_life():
+        monkeypatch.setattr(ollama_client, "chat_stream", hangs)
+        bot = make_bot()
+        await bot.handle(message("write me a short poem about the sea"))
+        await asyncio.wait_for(started.wait(), 5)
+        await bot.stop()
+
+    run(first_life())
+    assert fake.texts() == []
+    script(answer("The sea is wide, the sea is deep."))
+
+    async def second_life():
+        bot = make_bot()
+        await bot._connect()
+        offer = next(m for m in fake.sent("sendMessage") if "reply_markup" in m)
+        assert "poem about the sea" in offer["text"]
+        await bot.handle(button(offer["reply_markup"]["inline_keyboard"][0][0]["callback_data"]))
+        await until(lambda: any("the sea is deep" in t for t in fake.texts()))
+        # offered once: the next start doesn't ask again
+        await bot._connect()
+        await bot.stop()
+
+    run(second_life())
+    assert sum("reply_markup" in m for m in fake.sent("sendMessage")) == 1
+
+
+def _fake_research(monkeypatch):
+    async def fake_research(question, depth="quick"):
+        return ("Web research for: mcp\n\n[1] What is MCP — modelcontextprotocol.io\n"
+                "https://modelcontextprotocol.io/intro\n> MCP is the Model Context Protocol.")
+    monkeypatch.setattr(registry.get("research"), "handler", fake_research)
+
+
+def test_a_general_knowledge_answer_from_memory_gets_checked(env, monkeypatch):
+    fake, make_bot, script = env
+    _fake_research(monkeypatch)
+    llm = script(answer("MCP stands for Mod Coder Pack, a Minecraft tool."),
+                 tool("research", {"question": "what is an mcp server"}),
+                 answer("MCP is the Model Context Protocol [1]."))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("What is a mcp server"))
+        await until(lambda: any("Model Context Protocol" in t for t in fake.texts()))
+        await bot.stop()
+
+    run(main())
+    assert "general-knowledge question" in llm.rounds[0]["messages"][-1]["content"]
+    assert not any("Mod Coder" in t for t in fake.texts())
+    assert "https://modelcontextprotocol.io/intro" in fake.texts()[-1]
+
+
+def test_a_document_about_a_topic_is_researched_before_it_is_written(env, monkeypatch, tmp_path):
+    """Writing it from memory gave 'Multiplayer Challenge Platform servers':
+    a topic document goes through research_report instead."""
+    fake, make_bot, script = env
+    written, reports = [], []
+    monkeypatch.setattr(registry.get("create_word_document"), "handler",
+                        lambda **k: written.append(k) or "Created.")
+
+    async def report(topic, detail="detailed"):
+        reports.append(topic)
+        return f"Created Word document 'MCP Servers' at {tmp_path}/mcp.docx. Written from 5 web sources."
+
+    monkeypatch.setattr(registry.get("research_report"), "handler", report)
+    llm = script(tool("create_word_document", {"title": "MCP", "content": "Multiplayer servers…"}),
+                 tool("research_report", {"topic": "mcp servers"}),
+                 answer("Your MCP document is ready."))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("write a word document about mcp servers"))
+        await until(lambda: "Your MCP document is ready." in fake.texts())
+        await bot.stop()
+
+    run(main())
+    assert written == [] and reports == ["mcp servers"]
+    assert "research_report" in llm.rounds[1]["messages"][-1]["content"]
+    assert "research_report" in llm.rounds[1]["tools"]
+
+
+def test_after_a_no_jarvis_is_not_pushed_to_act(env):
+    fake, make_bot, script = env
+    llm = script(tool("send_email", {"to": "a@b.com", "subject": "Hi", "body": "Hello"}),
+                 answer("Okay, I won't send it. I'll keep it in mind if you change your mind."))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("email a@b.com saying hello"))
+        await until(lambda: any("reply_markup" in m for m in fake.sent("sendMessage")))
+        ask = next(m for m in fake.sent("sendMessage") if "reply_markup" in m)
+        await bot.handle(button(ask["reply_markup"]["inline_keyboard"][0][1]["callback_data"]))
+        await until(lambda: any("I won't send it" in t for t in fake.texts()))
+        await bot.stop()
+
+    run(main())
+    assert len(llm.rounds) == 2          # no "you said you would…" push after the no
+
+
+def test_a_false_claim_repeated_after_the_nudge_is_taken_out(env, monkeypatch, tmp_path):
+    fake, make_bot, script = env
+    monkeypatch.setattr(registry.get("list_directory"), "handler",
+                        lambda **k: f"{tmp_path} (1 item, newest first):\n2026-10-11 15:03  a.png")
+    script(tool("list_directory", {"path": str(tmp_path)}),
+           answer("I've sent you the file."),
+           answer("Done — I've sent you the file. It's a screenshot from today."))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("what's the newest file in that folder"))
+        await until(lambda: any("screenshot from today" in t for t in fake.texts()))
+        await bot.stop()
+
+    run(main())
+    final = fake.texts()[-1]
+    assert "sent you" not in final and "screenshot from today" in final
+
+
+# --- "send that to me" said at the Mac ------------------------------------------------
+
+def _mac_chat(*turns):
+    from app import db
+    conv = db.create_conversation()["id"]
+    for role, text in turns:
+        db.add_message(conv, role, text)
+    return conv
+
+
+async def _mac_turn(conv, text):
+    from app.chat import service as chat_service
+    return [e async for e in chat_service.run_chat(conv, text)]
+
+
+WEATHER = ("user", "what's the weather today"), ("assistant", "It's **16°C** and cloudy in London.")
+
+
+def test_send_that_to_me_at_the_mac_goes_to_telegram(env, monkeypatch):
+    fake, make_bot, script = env
+    llm = script()
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        events = await _mac_turn(_mac_chat(*WEATHER), "Can you send that to me?")
+        await bot.stop()
+        return events
+
+    events = run(main())
+    done = next(e for e in events if e["type"] == "done")
+    assert done["content"] == "Sent to your phone on Telegram."
+    msg = fake.sent("sendMessage")[-1]
+    assert msg["chat_id"] == USER["id"] and "<b>16°C</b>" in msg["text"]
+    assert llm.rounds == []                                   # instant: no model, no repeat
+    assert not any(e["type"] == "confirm_request" for e in events)   # they asked
+
+
+def test_send_me_the_whole_chat(env, monkeypatch):
+    fake, make_bot, script = env
+    script()
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        await _mac_turn(_mac_chat(*WEATHER, ("user", "and tomorrow?"),
+                                  ("assistant", "Tomorrow: 14–17°C with drizzle.")),
+                        "send me the whole chat")
+        await bot.stop()
+
+    run(main())
+    text = fake.sent("sendMessage")[-1]["text"]
+    assert "You:" in text and "Jarvis:" in text
+    assert "16°C" in text and "drizzle" in text and "whole chat" not in text
+
+
+def test_put_that_in_a_document_and_send_it(env, monkeypatch):
+    fake, make_bot, script = env
+    script()
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        await _mac_turn(_mac_chat(*WEATHER), "put that in a word document and send it to me")
+        await bot.stop()
+
+    run(main())
+    name, data = fake.sent("sendDocument")[-1]["_files"]["document"]
+    assert name.endswith(".docx")
+    body = "\n".join(p.text for p in docx.Document(io.BytesIO(data)).paragraphs)
+    assert "16°C" in body
+
+
+def test_send_that_to_me_without_telegram_says_how_to_set_it_up(env, monkeypatch):
+    fake, make_bot, script = env
+    script()
+    monkeypatch.setattr(tg, "_bot", None)
+    events = run(_mac_turn(_mac_chat(*WEATHER), "send that to me"))
+    done = next(e for e in events if e["type"] == "done")
+    assert "Settings → Phone" in done["content"] and "Sent" not in done["content"]
+    assert fake.sent("sendMessage") == []
+
+
+def test_repeating_the_answer_instead_of_sending_it_gets_pushed(env, monkeypatch):
+    """The original failure: asked to send the weather, it said the weather again."""
+    fake, make_bot, script = env
+    llm = script(answer("It's 16°C and cloudy in London."),
+                 tool("send_to_phone", {"what": "last_answer"}),
+                 answer("Done — it's on your phone."))
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        events = await _mac_turn(_mac_chat(*WEATHER), "can you send the weather you just gave me to me?")
+        await bot.stop()
+        return events
+
+    events = run(main())
+    assert "send_to_phone" in llm.rounds[1]["messages"][-1]["content"]
+    assert "send_to_phone" in llm.rounds[1]["tools"]
+    assert "16°C" in fake.sent("sendMessage")[-1]["text"]
+    final = next(e for e in events if e["type"] == "done")["content"]
+    assert final == "Done — it's on your phone."
+
+
+def test_a_document_is_made_before_it_is_sent(env, monkeypatch, tmp_path):
+    """Both called at once, send first, with a guessed file name."""
+    fake, make_bot, script = env
+    doc = tmp_path / "electric-cars.docx"
+
+    async def report(topic, detail="detailed"):
+        doc.write_bytes(b"PK report")
+        return f"Created Word document 'Electric cars' (870 words) at {doc}. Written from 5 web sources."
+
+    monkeypatch.setattr(registry.get("research_report"), "handler", report)
+    script(lambda msgs: ("multi", [("send_file", {"path": "~/Documents/Jarvis/Electric Cars Report.docx"}),
+                                   ("research_report", {"topic": "electric cars"})]),
+           answer("Your report is on your phone."))
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        await _mac_turn(_mac_chat(), "write a report about electric cars as a word document and send it to me")
+        await bot.stop()
+
+    run(main())
+    assert fake.sent("sendDocument")[0]["_files"]["document"][0] == "electric-cars.docx"
+
+
+def test_send_it_to_me_after_making_a_document_sends_the_document(env, monkeypatch, tmp_path):
+    fake, make_bot, script = env
+    llm = script()
+    doc = tmp_path / "mcp-servers-overview.docx"
+    doc.write_bytes(b"PK doc")
+    from app import db
+    conv = db.create_conversation()["id"]
+    db.add_message(conv, "user", "write a word document about mcp servers")
+    db.add_message(conv, "assistant", "I've created the Word document 'MCP Servers Overview'.",
+                   meta={"tools": [{"name": "research_report", "arguments": {"topic": "mcp"},
+                                    "result": f"Created Word document 'MCP Servers Overview' (612 words) at {doc}. "
+                                              "Written from 5 web sources."}]})
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        await _mac_turn(conv, "send it to me")
+        await bot.stop()
+
+    run(main())
+    assert fake.sent("sendDocument")[0]["_files"]["document"][0] == "mcp-servers-overview.docx"
+    assert fake.sent("sendMessage") == [] and llm.rounds == []
+
+
+def test_email_this_attaches_the_document_on_screen(env, monkeypatch):
+    fake, make_bot, script = env
+    from app.automation import selection
+    from app.security.permissions import confirmations
+    monkeypatch.setattr(selection, "describe", lambda: (
+        "App the user is in: Preview\nOpen document: /Users/me/Documents/lease.pdf  "
+        "(read it with read_document; attach this path)"))
+    script(tool("send_email", {"to": "a@b.com", "subject": "Lease", "body": "Here it is."}),
+           answer("Okay, not sent."))
+    asked = []
+
+    async def main():
+        from app.chat import service as chat_service
+        async for e in chat_service.run_chat(_mac_chat(), "email this to a@b.com"):
+            if e["type"] == "confirm_request":
+                asked.append(e)
+                confirmations.resolve(e["id"], False)
+
+    run(main())
+    assert asked[0]["arguments"]["attachments"] == ["/Users/me/Documents/lease.pdf"]

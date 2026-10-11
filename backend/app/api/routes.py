@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .. import db
+from .. import db, ui_bridge
 from ..agents.registry import AGENTS
 from ..chat import service as chat_service
 from ..config import settings
@@ -48,6 +48,12 @@ def get_settings():
 async def put_settings(body: SettingsPatch):
     audit.log("settings_changed", patch=body.patch)
     updated = settings.update(body.patch)
+    if (body.patch.get("proactive") or {}).get("enabled"):
+        # Proactive help rides on screen memory's captures: make sure it runs.
+        from ..vision import journal
+        if not journal.status()["running"]:
+            journal.start()
+            settings.update({"screen_memory": {"enabled": True}})
     if "enabled" in (body.patch.get("telegram") or {}):
         from ..channels import telegram
         await telegram.start()  # starts or stops the bot to match
@@ -509,6 +515,54 @@ def backgrounds_delete(name: str):
     return backgrounds.delete(name)
 
 
+# --- smart lights -------------------------------------------------------------------------
+
+@router.get("/lights")
+async def lights_list():
+    from .. import lights
+    if not lights.configured():
+        return {"configured": False, "lights": []}
+    return {"configured": True, "lights": await lights.status()}
+
+
+@router.post("/lights/connect")
+async def lights_connect(body: dict):
+    """The Tapo email + password, typed by the user: used to connect, never stored."""
+    from .. import lights
+    email, password = str(body.get("email", "")).strip(), str(body.get("password", ""))
+    if not email or not password:
+        return {"error": "Enter the email and password of your Tapo account."}
+    try:
+        found = await lights.connect_account(email, password)
+    except lights.LightsError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"Couldn't connect: {e}"}
+    audit.log("lights_connected", count=len(found))
+    return {"ok": True, "lights": found}
+
+
+@router.post("/lights/control")
+async def lights_control(body: dict):
+    from .. import lights
+    try:
+        text = await lights.control(str(body.get("light", "")), power=str(body.get("power", "")),
+                                    brightness=body.get("brightness") or None,
+                                    change=body.get("change") or None,
+                                    color=str(body.get("color", "")))
+    except lights.LightsError as e:
+        return {"error": str(e)}
+    return {"result": text}
+
+
+@router.delete("/lights")
+async def lights_forget():
+    from .. import lights
+    lights.forget()
+    audit.log("lights_forgotten")
+    return {"ok": True}
+
+
 # --- phone channel (Telegram) ---------------------------------------------------
 
 @router.get("/telegram/status")
@@ -541,6 +595,170 @@ def telegram_unpair(user_id: int):
     return telegram.unpair(user_id)
 
 
+# --- screen activity frame -------------------------------------------------------
+
+@router.post("/proactive/preview")
+async def proactive_preview():
+    """Show what an offer of help looks like (Settings → Offer help when I'm stuck)."""
+    from .. import ui_bridge
+    sent = await ui_bridge.announce(
+        "💡 Want a hand?",
+        "You've had “ModuleNotFoundError: No module named 'requests'” on screen for about "
+        "10 minutes. (This is a preview.)", speak=False,
+        action={"label": "Help me", "prompt": "Explain how to fix \"ModuleNotFoundError: No "
+                "module named 'requests'\" in a Python project, briefly."})
+    return {"shown": sent}
+
+
+# --- setup check ------------------------------------------------------------------------
+
+@router.get("/setup/check")
+async def setup_check_all():
+    from .. import setup_check
+    return await setup_check.run_all()
+
+
+@router.post("/setup/fix/{cid:path}")
+async def setup_fix(cid: str):
+    from .. import setup_check
+    try:
+        return await setup_check.fix(cid)
+    except Exception as e:
+        return {"result": f"Couldn't fix that automatically: {e}"}
+
+
+@router.post("/setup/open/{kind}")
+async def setup_open_pane(kind: str):
+    """Open a System Settings privacy pane (camera, microphone, …)."""
+    from .. import setup_check
+    setup_check.open_pane(kind)
+    return {"ok": True}
+
+
+# --- activity log & undo --------------------------------------------------------------
+
+@router.get("/activity")
+async def activity_list(limit: int = 150):
+    from .. import activity
+    return activity.recent(limit)
+
+
+@router.post("/activity/{aid}/undo")
+async def activity_undo(aid: str):
+    from .. import activity
+    return {"result": activity.undo(aid)}
+
+
+# --- learned test cases ----------------------------------------------------------------
+
+@router.get("/learned")
+async def learned_list():
+    from .. import learned
+    return {"candidates": learned.candidates(), "saved": len(learned.saved_cases())}
+
+
+@router.post("/learned/{cid}")
+async def learned_resolve(cid: str, body: dict):
+    """{"expected": ["tool", ...]} to save as a test ([] = no tools), {"dismiss": true} to drop."""
+    from .. import learned
+    if body.get("dismiss"):
+        return learned.resolve(cid, None)
+    expected = [t.strip() for t in body.get("expected", []) if t and t.strip()]
+    return learned.resolve(cid, expected)
+
+
+# --- routines & triggers ------------------------------------------------------------
+
+@router.get("/routines")
+async def routines_list():
+    from .. import routines
+    return [{k: v for k, v in r.items() if k != "state"} for r in routines.all_routines()]
+
+
+_TRIGGER_FIELDS = ("trigger", "at", "days", "every_minutes", "email_from", "email_subject",
+                   "minutes_before")
+
+
+def _trigger_from(body: dict):
+    from ..tools.builtin.routine_tools import build_trigger
+    args = {k: body[k] for k in _TRIGGER_FIELDS if body.get(k) not in (None, "")}
+    for k in ("every_minutes", "minutes_before"):
+        if k in args:
+            args[k] = int(args[k])
+    return build_trigger(**args)
+
+
+@router.post("/routines")
+async def routines_create(body: dict):
+    from .. import routines
+    spec, error = _trigger_from(body)
+    if spec is None:
+        return {"error": error}
+    action = (body.get("action") or "").strip()
+    name = (body.get("name") or "").strip() or (action[:40] or "Routine").capitalize()
+    return routines.add(name, spec, action, body.get("deliver") or "auto")
+
+
+@router.put("/routines/{rid}")
+async def routines_update(rid: str, body: dict):
+    """Pause/resume ({enabled}) or edit (name, action, deliver, trigger fields)."""
+    from .. import routines
+    fields: dict = {}
+    if "enabled" in body:
+        fields["enabled"] = bool(body["enabled"])
+    for k in ("name", "action", "deliver"):
+        if k in body:
+            fields[k] = (body[k] or "").strip() or ("auto" if k == "deliver" else "")
+    if any(k in body for k in _TRIGGER_FIELDS):
+        spec, error = _trigger_from(body)
+        if spec is None:
+            return {"error": error}
+        fields["trigger"] = spec
+        fields["state"] = {}          # a new trigger starts fresh
+    if fields:
+        routines.update(rid, **fields)
+    return routines.get(rid) or {"error": "no such routine"}
+
+
+@router.delete("/routines/{rid}")
+async def routines_delete(rid: str):
+    from .. import routines
+    routines.remove(rid)
+    return {"ok": True}
+
+
+@router.post("/routines/{rid}/run")
+async def routines_run(rid: str):
+    from .. import routines
+    r = routines.get(rid)
+    if r is None:
+        return {"error": "no such routine"}
+    return {"result": await routines.fire(r)}
+
+
+@router.post("/chat/prefetch")
+async def chat_prefetch(body: dict):
+    """Voice: the first words of a request while the user is still speaking —
+    warm the model up for the reply (see chat/prefetch.py)."""
+    from ..chat import prefetch
+    try:
+        return await prefetch.warm(body.get("conversation_id"), body.get("text", ""))
+    except Exception as e:
+        return {"skipped": f"error: {e}"}
+
+
+@router.post("/screen/stop")
+async def screen_stop(body: dict | None = None):
+    """Emergency stop: Esc while the frame is up, or "Jarvis stop"."""
+    return {"cancelled": ui_bridge.stop_control((body or {}).get("reason", "Esc"))}
+
+
+@router.get("/screen/activity")
+async def screen_activity():
+    """Polled by the desktop app to draw a frame while Jarvis reads/controls the screen."""
+    return ui_bridge.current()
+
+
 # --- live camera vision ----------------------------------------------------------
 
 @router.post("/vision/ask")
@@ -548,6 +766,14 @@ async def vision_ask(body: dict):
     """Answer a question about a camera/image frame (base64). Streams the reply."""
     image_b64 = (body.get("image") or "").split(",")[-1]  # strip data: prefix
     question = (body.get("question") or "What do you see?").strip()
+    if image_b64:   # smaller image, same answer, much faster
+        import base64 as _b64
+        from ..vision import ocr
+        try:
+            image_b64 = _b64.b64encode(await asyncio.to_thread(
+                ocr.shrink_for_vision, _b64.b64decode(image_b64))).decode()
+        except Exception:
+            pass
     vision_model = settings.get("ollama.vision_model", "")
     if not vision_model:
         async def no_model():
@@ -678,12 +904,52 @@ async def stt_download(body: dict | None = None):
 
 
 @router.post("/stt/transcribe")
-async def stt_transcribe(request: Request, hint: str = ""):
-    from ..speech import stt
+async def stt_transcribe(request: Request, hint: str = "", command: int = 0):
+    from ..speech import stt, voiceprint
     audio = await request.body()
     if not audio:
         return {"error": "empty audio"}
-    return await stt.transcribe(audio, hint=hint[:200])
+    # Voice lock: someone else's voice (TV, visitors) is ignored.
+    allowed, match = await asyncio.to_thread(voiceprint.check, audio)
+    if not allowed:
+        audit.log("voice_rejected", score=round(match or 0, 3))
+        return {"text": "", "rejected": "voice", "score": match}
+    result = await stt.transcribe(audio, hint=hint[:200], command=bool(command))
+    if match is not None:
+        result["voice_score"] = round(match, 3)
+    return result
+
+
+# --- voice lock (experimental) -------------------------------------------------------
+
+@router.get("/voice/lock")
+async def voice_lock_status():
+    from ..speech import voiceprint
+    vp = voiceprint.enrolled()
+    return {"available": voiceprint.available(), "enrolled": vp is not None,
+            "seconds": (vp or {}).get("seconds"), "enabled": voiceprint.locked(),
+            "threshold": voiceprint.threshold()}
+
+
+@router.post("/voice/enroll")
+async def voice_enroll(request: Request, step: str = "add"):
+    """step=add (body: a WAV phrase) · finish · reset"""
+    from ..speech import voiceprint
+    if step == "reset":
+        voiceprint.enroll_reset()
+        return {"ok": True}
+    if step == "finish":
+        return await asyncio.to_thread(voiceprint.enroll_finish)
+    return await asyncio.to_thread(voiceprint.enroll_add, await request.body())
+
+
+@router.post("/voice/test")
+async def voice_test(request: Request):
+    """How closely does this recording match the enrolled voice?"""
+    from ..speech import voiceprint
+    s = await asyncio.to_thread(voiceprint.score, await request.body())
+    return {"score": None if s is None else round(s, 3), "threshold": voiceprint.threshold(),
+            "would_pass": s is None or s >= voiceprint.threshold()}
 
 
 # --- code studio ---------------------------------------------------------------
@@ -777,9 +1043,9 @@ async def ws_chat(ws: WebSocket):
     await ws.accept()
     current_task: asyncio.Task | None = None
 
-    async def run(conv_id: str, content: str):
+    async def run(conv_id: str, content: str, spoken: bool = False):
         try:
-            async for event in chat_service.run_chat(conv_id, content):
+            async for event in chat_service.run_chat(conv_id, content, spoken=spoken):
                 await ws.send_json(event)
         except WebSocketDisconnect:
             pass
@@ -803,7 +1069,9 @@ async def ws_chat(ws: WebSocket):
                            or db.create_conversation(
                                mode=msg.get("mode", "chat"))["id"])
                 await ws.send_json({"type": "conversation", "conversation_id": conv_id})
-                current_task = asyncio.create_task(run(conv_id, msg.get("content", "")))
+                current_task = asyncio.create_task(
+                    run(conv_id, msg.get("content", ""), bool(msg.get("voice"))))
+                ui_bridge.track(current_task)
 
             elif mtype == "confirm":
                 confirmations.resolve(msg.get("id", ""), bool(msg.get("approved")))
@@ -815,6 +1083,14 @@ async def ws_chat(ws: WebSocket):
             elif mtype == "stop":
                 if current_task and not current_task.done():
                     current_task.cancel()
+
+            elif mtype == "hello" and msg.get("ui"):
+                ui_bridge.register(ws)   # a Jarvis window: it can take camera photos
+
+            elif mtype == "ui_response":
+                ui_bridge.resolve(msg.get("id", ""), msg.get("data"))
     except WebSocketDisconnect:
         if current_task and not current_task.done():
             current_task.cancel()
+    finally:
+        ui_bridge.unregister(ws)

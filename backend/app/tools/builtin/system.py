@@ -104,6 +104,17 @@ def safe_eval(expression: str):
     return ev(ast.parse(expression, mode="eval"))
 
 
+async def _screenshot() -> Path:
+    """Capture the screen to a temp PNG, with the "reading your screen" frame
+    shown so the user knows."""
+    from ... import ui_bridge
+    path = Path(tempfile.mkstemp(suffix=".png")[1])
+    async with ui_bridge.screen_activity("reading"):
+        proc = await asyncio.create_subprocess_exec("screencapture", "-x", str(path))
+        await proc.wait()
+    return path
+
+
 async def _describe_image(path: Path, question: str) -> str:
     """Send an image to the configured multimodal model."""
     from ...llm import ollama_client
@@ -111,7 +122,9 @@ async def _describe_image(path: Path, question: str) -> str:
     if not vision_model:
         return ("Image captured at " + str(path) + ", but no vision model is configured. "
                 "Set one in Settings (e.g. pull 'llava' or 'llama3.2-vision').")
-    img_b64 = base64.b64encode(path.read_bytes()).decode()
+    from ...vision import ocr
+    small = await asyncio.to_thread(ocr.shrink_for_vision, path.read_bytes())
+    img_b64 = base64.b64encode(small).decode()
     text = await ollama_client.chat_once(
         [{"role": "user", "content": question, "images": [img_b64]}],
         model=vision_model)
@@ -131,13 +144,19 @@ async def _describe_image(path: Path, question: str) -> str:
     agent_tags=["vision"],
 )
 async def screen_look(question: str = "Describe what is on this screen.") -> str:
-    path = Path(tempfile.mkstemp(suffix=".png")[1])
-    proc = await asyncio.create_subprocess_exec("screencapture", "-x", str(path))
-    await proc.wait()
+    path = await _screenshot()
     if not path.exists() or path.stat().st_size == 0:
         return "Screen capture failed — check Screen Recording permission in System Settings."
     try:
-        return await _describe_image(path, question)
+        # The exact on-screen text helps the vision model with small print.
+        from ...vision import ocr
+        try:
+            text = (await ocr.ocr_file(path))[:3000]
+        except Exception:
+            text = ""
+        prompt = (f"{question}\n\nExact text visible on the screen (from OCR), for "
+                  f"reference:\n{text}" if text.strip() else question)
+        return await _describe_image(path, prompt)
     finally:
         path.unlink(missing_ok=True)
 
@@ -154,9 +173,7 @@ async def screen_look(question: str = "Describe what is on this screen.") -> str
 )
 async def screen_read() -> str:
     from ...vision import ocr
-    path = Path(tempfile.mkstemp(suffix=".png")[1])
-    proc = await asyncio.create_subprocess_exec("screencapture", "-x", str(path))
-    await proc.wait()
+    path = await _screenshot()
     if not path.exists() or path.stat().st_size == 0:
         return "Screen capture failed — check Screen Recording permission in System Settings."
     try:
@@ -170,9 +187,10 @@ async def screen_read() -> str:
 
 @tool(
     name="camera_look",
-    description="Take a photo with the webcam and describe what the camera sees, or "
-                "answer a question about it. Requires the 'imagesnap' utility "
-                "(brew install imagesnap) and camera permission.",
+    description="Open the camera and look: switches the Jarvis app to its Camera tab, "
+                "takes a photo and describes what the camera sees, or answers a question "
+                "about it (\"what am I holding?\", \"open the camera and tell me what you "
+                "see\"). You CAN see through the camera — never say you can't.",
     parameters={
         "type": "object",
         "properties": {"question": {"type": "string",
@@ -182,17 +200,28 @@ async def screen_read() -> str:
     agent_tags=["vision"],
 )
 async def camera_look(question: str = "Describe what you see.") -> str:
+    from ... import ui_bridge
     path = Path(tempfile.mkstemp(suffix=".jpg")[1])
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "imagesnap", "-w", "1.5", str(path),
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        await proc.wait()
-    except FileNotFoundError:
-        return "Camera capture needs the 'imagesnap' utility. Install it with: brew install imagesnap"
-    if not path.exists() or path.stat().st_size == 0:
-        return "Camera capture failed — check camera permission."
-    try:
+        # The Jarvis window has camera permission (the backend usually doesn't),
+        # and the user sees the camera open in it.
+        reply = await ui_bridge.request("camera_frame", timeout=20)
+        image = (reply.get("image") or "").split(",")[-1]
+        if image:
+            path.write_bytes(base64.b64decode(image))
+        elif reply.get("error") not in (None, "no_ui"):
+            return f"Couldn't use the camera: {reply['error']}"
+        else:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "imagesnap", "-w", "1.5", str(path),
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await proc.wait()
+            except FileNotFoundError:
+                return ("Open the Jarvis app so I can use its camera (or install imagesnap: "
+                        "brew install imagesnap).")
+        if not path.exists() or path.stat().st_size == 0:
+            return "Camera capture failed — open the Jarvis app and allow camera access."
         return await _describe_image(path, question)
     finally:
         path.unlink(missing_ok=True)
@@ -200,9 +229,10 @@ async def camera_look(question: str = "Describe what you see.") -> str:
 
 @tool(
     name="search_documents",
-    description="Search the user's ingested documents (PDFs, notes, files added to the "
-                "knowledge base) and return the most relevant passages. Use whenever a "
-                "question might be answered by the user's own files.",
+    description="Search INSIDE the user's indexed documents (knowledge base) by meaning "
+                "and return the most relevant passages — for questions answered by what "
+                "their files SAY. To find a file by its name (\"find my tax return\"), use "
+                "search_files instead.",
     parameters={
         "type": "object",
         "properties": {"query": {"type": "string"}},
@@ -211,13 +241,19 @@ async def camera_look(question: str = "Describe what you see.") -> str:
 )
 async def search_documents(query: str) -> str:
     from ...knowledge import store as knowledge
+    from .documents import _spotlight
     results = await knowledge.search(query)
+    # Often the user means a FILE called that ("my tax return"): include name matches.
+    named = await asyncio.to_thread(_spotlight, query)
+    files = ("\n\nFiles whose names match:\n" + "\n".join(str(f) for f in named[:8])
+             if named else "")
     if not results:
-        return ("No matching passages. The knowledge base may be empty — the user can "
-                "add documents in the Memory page.")
+        return ("No matching passages in the indexed documents." + files if files else
+                "No matching passages, and no files with that name. (index_documents can "
+                "make a folder searchable.)")
     return "\n\n".join(
         f"[{r['document']}] (relevance {r['score']})\n{r['content'][:800]}"
-        for r in results)
+        for r in results) + files
 
 
 @tool(
@@ -315,26 +351,11 @@ def project_remember(project_name: str, note: str) -> str:
 async def daily_briefing() -> str:
     import subprocess
 
-    import httpx
     parts = [f"Now: {datetime.datetime.now().strftime('%A, %B %d %Y, %H:%M')}"]
 
-    # weather (wttr.in geolocates by IP; no API key, local-friendly)
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get("https://wttr.in/?format=j1")
-            w = r.json()
-            cur = w["current_condition"][0]
-            today = w["weather"][0]
-            area = w.get("nearest_area", [{}])[0]
-            city = area.get("areaName", [{}])[0].get("value", "your area")
-            parts.append(
-                f"Weather in {city}: {cur['weatherDesc'][0]['value']}, "
-                f"{cur['temp_C']}°C (feels {cur['FeelsLikeC']}°C). "
-                f"Today: {today['mintempC']}–{today['maxtempC']}°C, "
-                f"sunrise {today['astronomy'][0]['sunrise']}, "
-                f"sunset {today['astronomy'][0]['sunset']}.")
-    except Exception as e:
-        parts.append(f"Weather unavailable ({e}).")
+    # weather: Open-Meteo, for the user's town (or where the connection is)
+    from .weather import weather
+    parts.append(await weather(days=1))
 
     # today's calendar
     def osa(script: str) -> str:
@@ -467,8 +488,9 @@ async def stop_screen_memory() -> str:  # cancels a task (loop-only)
 @tool(
     name="remember",
     description="Save a fact to long-term memory so it persists across conversations. "
-                "Use when the user shares preferences, projects, contacts, goals, or "
-                "says 'remember that...'.",
+                "Use when the user shares preferences, projects, goals, or says "
+                "'remember that...'. For a PERSON's email/phone/relation use "
+                "remember_person instead.",
     parameters={
         "type": "object",
         "properties": {
@@ -481,5 +503,22 @@ async def stop_screen_memory() -> str:  # cancels a task (loop-only)
 )
 async def remember(fact: str, category: str = "general") -> str:
     from ...memory import store
-    await store.save(fact, category)
+    saved = await store.save(fact, category)
+    from ... import activity
+    if isinstance(saved, dict) and saved.get("id"):
+        activity.offer_undo(kind="forget_memory", id=saved["id"])
     return f"Remembered: {fact}"
+
+
+@tool(
+    name="undo_last",
+    description="Undo the last thing Jarvis did that can be undone — \"undo that\", "
+                "\"put it back\": moves a file back, restores an overwritten or trashed "
+                "file, removes a document or folder it just created, forgets what it just "
+                "saved.",
+    parameters={"type": "object", "properties": {}},
+    risk="confirm",
+)
+def undo_last() -> str:
+    from ... import activity
+    return activity.undo_last()

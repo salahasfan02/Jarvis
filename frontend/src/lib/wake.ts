@@ -9,7 +9,9 @@
 
 const VARIANTS: Record<string, string[]> = {
   jarvis: ["jervis", "jarvus", "javis", "jarves", "jarvas", "garvis", "gervais",
-           "jervais", "charvis", "chavis", "jarbis", "jaavis", "jarvez", "jarvice"],
+           "jervais", "charvis", "chavis", "jarbis", "jaavis", "jarvez", "jarvice",
+           // said inside Arabic speech, Whisper writes it in Arabic letters
+           "جارفيس", "جارفس", "جارڤيس", "جارفز", "جارفيز", "جارفيث"],
 };
 
 const FILLER = new Set(["um", "uh", "uhm", "hmm", "hey", "ok", "okay", "so", "and"]);

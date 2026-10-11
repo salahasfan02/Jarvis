@@ -1,7 +1,61 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Gauge, ImagePlus, X } from "lucide-react";
+import {
+  Bot, Brain, Check, Cpu, Gauge, ImagePlus, KeyRound, Laptop, Lightbulb, Mic, Palette, ShieldBan, Smartphone,
+  UserRound, X,
+} from "lucide-react";
+import { PageHeader } from "../components/ui";
+import { LightsPanel } from "../components/LightsPanel";
+
+const SECTIONS = [
+  { id: "s-model", label: "AI models", icon: Cpu },
+  { id: "s-assistant", label: "Assistant", icon: Bot },
+  { id: "s-voice", label: "Voice", icon: Mic },
+  { id: "s-phone", label: "Phone", icon: Smartphone },
+  { id: "s-lights", label: "Smart lights", icon: Lightbulb },
+  { id: "s-memory", label: "Memory", icon: Brain },
+  { id: "s-you", label: "About you", icon: UserRound },
+  { id: "s-offlimits", label: "Off-limits", icon: ShieldBan },
+  { id: "s-permissions", label: "Permissions", icon: KeyRound },
+  { id: "s-appearance", label: "Appearance", icon: Palette },
+  { id: "s-desktop", label: "Desktop app", icon: Laptop },
+];
+
+/** Which section is in view, for the menu on the left. */
+/** The section being read: the last one whose top has reached the top of the page.
+ *  (Picking among the sections that just came into view chose "Memory" right after
+ *  a jump to the short "Smart lights" panel above it.) */
+function useSectionSpy(rootRef: React.RefObject<HTMLDivElement>, ready: boolean) {
+  const [active, setActive] = useState(SECTIONS[0].id);
+  const jumping = useRef(false);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !ready) return;
+    let settle = 0;
+    const onScroll = () => {
+      window.clearTimeout(settle);
+      settle = window.setTimeout(() => { jumping.current = false; }, 150);
+      // A jump from the menu keeps its section — even one too near the end to reach the top.
+      if (jumping.current) return;
+      const line = root.getBoundingClientRect().top + 120;
+      let current = SECTIONS[0].id;
+      for (const sec of SECTIONS) {
+        const el = document.getElementById(sec.id);
+        if (el && el.getBoundingClientRect().top <= line) current = sec.id;
+      }
+      setActive(current);
+    };
+    root.addEventListener("scroll", onScroll, { passive: true });
+    return () => { root.removeEventListener("scroll", onScroll); window.clearTimeout(settle); };
+  }, [ready]);
+  const jumpTo = (id: string) => {
+    jumping.current = true;
+    setActive(id);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  return [active, jumpTo] as const;
+}
 import { API, api, OllamaModel, pullModel, statsApi } from "../lib/api";
-import { VoiceDiag, voiceBus, voiceDiag } from "../lib/voice";
+import { recordUtterance, VoiceDiag, voiceBus, voiceDiag } from "../lib/voice";
 
 function Row(props: { label: string; sub?: string; children: React.ReactNode }) {
   return (
@@ -209,7 +263,7 @@ function PhonePanel(props: { onPatch: (patch: any) => void }) {
     : st.enabled ? "Connecting to Telegram…" : "Off — Jarvis isn't reading Telegram.";
 
   return (
-    <div className="panel">
+    <div className="panel" id="s-phone">
       <h3>Phone (Telegram)</h3>
       <div className="sub" style={{ marginBottom: 8 }}>
         Text or voice-message Jarvis from anywhere: “send me the PDF in my Downloads”,
@@ -289,11 +343,16 @@ export function SettingsPage(props: {
   onPatch: (patch: any) => void;
 }) {
   const s = props.settings;
+  const pageRef = useRef<HTMLDivElement>(null);
+  const [activeSection, jumpToSection] = useSectionSpy(pageRef, !!s);
   const [choosingPicture, setChoosingPicture] = useState(false);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [pullName, setPullName] = useState("");
   const [pullStatus, setPullStatus] = useState<{ text: string; pct: number } | null>(null);
   const [tools, setTools] = useState<any[]>([]);
+  const [toolQuery, setToolQuery] = useState("");
+  const [toolFilter, setToolFilter] = useState<"all" | "changed" | "asks">("all");
+  const [allTools, setAllTools] = useState(false);
   const [engines, setEngines] = useState<any[]>([]);
   const [kokoroVoices, setKokoroVoices] = useState<{ id: string; name: string }[]>([]);
   const [downloadStatus, setDownloadStatus] = useState<string>("");
@@ -361,7 +420,7 @@ export function SettingsPage(props: {
       const res = await fetch(`${API}/stt/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: s?.voice?.whisper_model ?? "base" }),
+        body: JSON.stringify({ model: s?.voice?.whisper_model ?? "small.en" }),
       });
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
@@ -442,11 +501,20 @@ export function SettingsPage(props: {
   };
 
   return (
-    <div className="page">
-      <div className="page-inner">
-        <h1>Settings</h1>
+    <div className="page" ref={pageRef}>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SECTIONS.map((sec) => (
+            <button key={sec.id} className={activeSection === sec.id ? "active" : ""}
+                    onClick={() => jumpToSection(sec.id)}>
+              <sec.icon /> {sec.label}
+            </button>
+          ))}
+        </nav>
+        <div className="settings-content">
+        <PageHeader title="Settings">Models, voice, your phone, privacy — and how Jarvis looks.</PageHeader>
 
-        <div className="panel">
+        <div className="panel" id="s-model">
           <h3>AI model</h3>
           <Row label="Active model" sub="Used for all conversations; switch anytime.">
             <select
@@ -545,7 +613,7 @@ export function SettingsPage(props: {
           </Row>
         </div>
 
-        <div className="panel">
+        <div className="panel" id="s-assistant">
           <h3>Assistant</h3>
           <Row label="Name">
             <input type="text" value={s.assistant.name}
@@ -564,7 +632,7 @@ export function SettingsPage(props: {
           </Row>
         </div>
 
-        <div className="panel">
+        <div className="panel" id="s-voice">
           <h3>Voice</h3>
           <Row label="Voice input" sub="Microphone button & wake word">
             <Toggle checked={s.voice.enabled}
@@ -629,17 +697,27 @@ export function SettingsPage(props: {
               <option value="browser">Browser (Chrome, online)</option>
             </select>
           </Row>
+          <VoiceLock onPatch={props.onPatch} />
+          <Row label="Also understand Arabic"
+               sub="Commands can be in Arabic as well as English (Jarvis answers in the language you use, with macOS's Arabic voice). Listening for “Jarvis” stays on the English model. Downloads a 480 MB speech model the first time.">
+            <Toggle checked={((s.voice as any).languages ?? ["en"]).includes("ar")}
+                    onChange={(v) => {
+                      props.onPatch({ voice: { languages: v ? ["en", "ar"] : ["en"] } } as any);
+                      if (v) fetch(`${API}/setup/fix/whisper_multi`, { method: "POST" });
+                    }} />
+          </Row>
           {(s.voice.stt_engine ?? "whisper") === "whisper" && (
             <Row label="Whisper model"
                  sub={sttStatus?.available
                       ? `'${sttStatus.model}' ready — recognition is fully local`
-                      : "tiny 75 MB (fastest) · base 145 MB (recommended) · small 484 MB (most accurate)"}>
+                      : "small.en 484 MB (recommended — catches the wake word reliably) · base 145 MB (faster, misses more) · small 484 MB (other languages)"}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <select value={s.voice.whisper_model ?? "base"}
+                <select value={s.voice.whisper_model ?? "small.en"}
                         onChange={(e) => props.onPatch({ voice: { whisper_model: e.target.value } })}>
-                  <option value="tiny">tiny</option>
+                  <option value="small.en">small.en (English, recommended)</option>
                   <option value="base">base</option>
-                  <option value="small">small</option>
+                  <option value="tiny">tiny</option>
+                  <option value="small">small (multilingual)</option>
                 </select>
                 {sttStatus && !sttStatus.available && (
                   <button className="btn primary" disabled={!!sttDownload && !sttDownload.startsWith("failed")}
@@ -658,8 +736,9 @@ export function SettingsPage(props: {
         </div>
 
         <PhonePanel onPatch={props.onPatch} />
+        <LightsPanel />
 
-        <div className="panel">
+        <div className="panel" id="s-memory">
           <h3>Memory</h3>
           <Row label="Long-term memory" sub="Recall saved facts in every conversation">
             <Toggle checked={s.memory.enabled}
@@ -690,18 +769,89 @@ export function SettingsPage(props: {
                       onChange={(v) => toggleScreenMemory(v)} />
             </div>
           </Row>
+          <Row label="Offer help when I'm stuck"
+               sub="If the same error stays on your screen for ~10 minutes, Jarvis offers to help (at most every 30 minutes, never during meetings). Uses screen memory, which this turns on.">
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn" onClick={() => fetch(`${API}/proactive/preview`, { method: "POST" })}>
+                Preview
+              </button>
+              <Toggle checked={(s as any).proactive?.enabled ?? false}
+                      onChange={(v) => { props.onPatch({ proactive: { enabled: v } } as any);
+                                         if (v) setTimeout(refreshScreenMem, 800); }} />
+            </div>
+          </Row>
         </div>
 
-        <div className="panel">
+
+        <div className="panel" id="s-you">
+          <h3>About you</h3>
+          <div className="sub" style={{ marginBottom: 8 }}>
+            Used to fill in forms (“fill this in with my details”) and sign emails. Stored only
+            on this Mac. Jarvis never fills passwords, card or bank details.
+          </div>
+          {([["full_name", "Full name"], ["email", "Email"], ["phone", "Phone"],
+             ["address_line1", "Address line 1"], ["address_line2", "Address line 2"],
+             ["city", "Town / city"], ["county", "County / state"], ["postcode", "Postcode / ZIP"],
+             ["country", "Country"], ["company", "Company"], ["job_title", "Job title"],
+             ["website", "Website"], ["signature", "Email sign-off"]] as const).map(([key, label]) => (
+            <Row key={key} label={label}>
+              <input className="search" style={{ width: 300 }}
+                     defaultValue={(s as any).profile?.[key] ?? ""}
+                     placeholder={key === "signature" ? "e.g. Best, Salah" : ""}
+                     onBlur={(e) => props.onPatch({ profile: { [key]: e.target.value.trim() } } as any)} />
+            </Row>
+          ))}
+        </div>
+
+        <div className="panel" id="s-offlimits">
+          <h3>Off-limits for screen control</h3>
+          <Row label="Apps" sub="Jarvis never presses, types or clicks in these (comma-separated)">
+            <textarea className="search" rows={2} style={{ width: 340 }}
+                      defaultValue={(s.control?.blocked_apps ?? []).join(", ")}
+                      onBlur={(e) => props.onPatch({ control: { blocked_apps:
+                        e.target.value.split(",").map((x) => x.trim()).filter(Boolean) } })} />
+          </Row>
+          <Row label="Websites" sub="…nor on pages whose address contains any of these words">
+            <textarea className="search" rows={2} style={{ width: 340 }}
+                      defaultValue={(s.control?.blocked_sites ?? []).join(", ")}
+                      onBlur={(e) => props.onPatch({ control: { blocked_sites:
+                        e.target.value.split(",").map((x) => x.trim()).filter(Boolean) } })} />
+          </Row>
+        </div>
+
+        <div className="panel" id="s-permissions">
           <h3>Tool permissions</h3>
           <Row label="Tools enabled" sub="Let the assistant use tools at all">
             <Toggle checked={s.tools.enabled}
                     onChange={(v) => props.onPatch({ tools: { enabled: v } })} />
           </Row>
-          {tools.map((t) => (
-            <Row key={t.name} label={t.name} sub={t.description.slice(0, 90)}>
+          <p className="desc" style={{ marginTop: 12 }}>
+            What Jarvis may do without asking. Sending email and anything risky always asks.
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+            <input className="field" style={{ flex: 1 }} placeholder={`Search ${tools.length} tools…`}
+                   aria-label="Search tools" value={toolQuery} onChange={(e) => setToolQuery(e.target.value)} />
+            <div className="seg">
+              {([["all", "All"], ["asks", "Asks first"], ["changed", "Changed"]] as const).map(([k, label]) => (
+                <button key={k} className={toolFilter === k ? "active" : ""} onClick={() => setToolFilter(k)}>{label}</button>
+              ))}
+            </div>
+          </div>
+          {(() => {
+            const q = toolQuery.trim().toLowerCase();
+            const shown = tools.filter((t) =>
+              (!q || t.name.includes(q.replace(/ /g, "_")) || t.description.toLowerCase().includes(q))
+              && (toolFilter === "all" || (toolFilter === "changed" ? t.permission !== "default"
+                  : t.risk !== "safe" || t.always_ask)));
+            const limited = allTools || q ? shown : shown.slice(0, 8);
+            return (
+              <>
+                {shown.length === 0 && <div className="sub" style={{ padding: "12px 0" }}>No tools match.</div>}
+                {limited.map((t) => (
+            <Row key={t.name} label={t.name.replace(/_/g, " ").replace(/^./, (c: string) => c.toUpperCase())}
+                 sub={t.description.slice(0, 110)}>
               {t.risk === "dangerous" || t.always_ask ? (
-                <span className="sub" style={{ color: "var(--danger)" }}>always asks</span>
+                <span className="badge warn">Always asks</span>
               ) : (
                 <select
                   value={t.permission}
@@ -714,10 +864,17 @@ export function SettingsPage(props: {
                 </select>
               )}
             </Row>
-          ))}
+                ))}
+                {!q && shown.length > limited.length && (
+                  <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setAllTools(true)}>
+                    Show all {shown.length} tools</button>
+                )}
+              </>
+            );
+          })()}
         </div>
 
-        <div className="panel">
+        <div className="panel" id="s-appearance">
           <h3>Appearance</h3>
           <Row label="Theme" sub="Color scheme for the whole app">
             <select value={s.ui.theme}
@@ -788,7 +945,103 @@ export function SettingsPage(props: {
                     onChange={(v) => props.onPatch({ ui: { glass: v } })} />
           </Row>
         </div>
+        <LoginItem />
+        </div>
       </div>
+    </div>
+  );
+}
+
+
+const ENROLL_PHRASES = [
+  "Jarvis, what's the weather going to be like this afternoon?",
+  "Hey Jarvis, remind me to call my mum when I get home tonight.",
+  "Jarvis, play some relaxing music and turn the volume down a little.",
+];
+
+/** Voice lock (experimental): set up a voiceprint, calibrate, switch on. */
+function VoiceLock(props: { onPatch: (p: any) => void }) {
+  const [st, setSt] = useState<any>(null);
+  const [step, setStep] = useState(-1);          // enrolment phrase being recorded
+  const [msg, setMsg] = useState("");
+  const [score, setScore] = useState<number | null>(null);
+  const load = () => fetch(`${API}/voice/lock`).then((r) => r.json()).then(setSt).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const enrol = async () => {
+    await fetch(`${API}/voice/enroll?step=reset`, { method: "POST" });
+    for (let i = 0; i < ENROLL_PHRASES.length; i++) {
+      setStep(i);
+      setMsg(`Say: “${ENROLL_PHRASES[i]}”`);
+      const wav = await recordUtterance(10000);
+      if (!wav) { setMsg("Didn't hear anything — try again."); setStep(-1); return; }
+      const r = await fetch(`${API}/voice/enroll?step=add`, { method: "POST", body: wav }).then((x) => x.json());
+      if (r.error) { setMsg(r.error); i--; continue; }
+    }
+    setStep(-1);
+    const r = await fetch(`${API}/voice/enroll?step=finish`, { method: "POST" }).then((x) => x.json());
+    setMsg(r.error ?? "Voice set up. Now press “Test my voice” a few times to see your scores.");
+    load();
+  };
+  const test = async () => {
+    setMsg("Say anything for a couple of seconds…");
+    const wav = await recordUtterance(8000);
+    if (!wav) { setMsg("Didn't hear anything."); return; }
+    const r = await fetch(`${API}/voice/test`, { method: "POST", body: wav }).then((x) => x.json());
+    setScore(r.score);
+    setMsg(r.score === null ? "Too short to judge — speak a bit longer."
+      : `Match ${Math.round(r.score * 100)}% — ${r.would_pass ? "would be accepted" : "would be ignored"} at the current strictness.`);
+  };
+
+  if (!st) return null;
+  return (
+    <Row label="Voice lock (experimental)"
+         sub={!st.available ? "Only answer your voice. Needs a small voice model (28 MB)."
+              : st.enrolled ? `Only answer your voice — ${st.enabled ? "ON" : "off"}. Calibrate with “Test my voice”: ask a friend or the TV too; pick a strictness between their score and yours.`
+              : "Only answer your voice. Record three short sentences to set it up."}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end", maxWidth: 360 }}>
+        {!st.available ? (
+          <button className="btn" onClick={() => fetch(`${API}/setup/fix/voiceprint_model`, { method: "POST" })
+                                              .then(() => setTimeout(load, 8000))}>Download</button>
+        ) : (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn" disabled={step >= 0} onClick={enrol}>
+              {st.enrolled ? "Re-record my voice" : "Set up my voice"}
+            </button>
+            {st.enrolled && <button className="btn" onClick={test}>Test my voice</button>}
+            {st.enrolled && (
+              <Toggle checked={st.enabled} onChange={(v) => { props.onPatch({ voice: { lock: { enabled: v } } }); setTimeout(load, 300); }} />
+            )}
+          </div>
+        )}
+        {st.enrolled && (
+          <label className="sub" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            Strictness {Math.round(st.threshold * 100)}%
+            <input type="range" min={20} max={80} value={Math.round(st.threshold * 100)}
+                   onChange={(e) => setSt({ ...st, threshold: parseInt(e.target.value) / 100 })}
+                   onMouseUp={(e) => props.onPatch({ voice: { lock: { threshold: parseInt((e.target as HTMLInputElement).value) / 100 } } })} />
+          </label>
+        )}
+        {msg && <div className="sub" style={{ color: score !== null && st.enrolled ? "var(--accent)" : undefined }}>{msg}</div>}
+      </div>
+    </Row>
+  );
+}
+
+
+/** "Open Jarvis when I log in" — only inside the installed Jarvis app. */
+function LoginItem() {
+  const bridge = (window as any).jarvisWindow;
+  const [state, setState] = useState<{ packaged: boolean; enabled: boolean } | null>(null);
+  useEffect(() => { bridge?.loginItem?.().then(setState).catch(() => {}); }, []);
+  if (!bridge?.loginItem || !state?.packaged) return null;
+  return (
+    <div className="panel" id="s-desktop">
+      <h3>Desktop app</h3>
+      <Row label="Open Jarvis when I log in" sub="Starts quietly in the background, ready for “Jarvis…”.">
+        <Toggle checked={state.enabled}
+                onChange={(v) => bridge.loginItem(v).then(setState).catch(() => {})} />
+      </Row>
     </div>
   );
 }

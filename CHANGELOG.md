@@ -1,11 +1,126 @@
 # What changed
 
-Everything added or fixed on branch `claude/trusting-wright-ojvok1`, since
-commit `d719a39` ("Revise README for clarity and updated instructions").
-That is 11 commits and 59 files (+5,518 / −523 lines). The short hashes in
-brackets show which commit made each change.
+Newest first. The short hashes in brackets show which commit made each change.
 
 ---
+
+# October 2026 — research, Apple Music, smart lights, a redesign and a real Mac app
+
+## Research the web, with sources [8c16c6d, be67cd9]
+
+- **"Do a research on MCP servers"** — Jarvis searches (DuckDuckGo, then
+  Bing), reads the top pages, keeps the passages that answer the question
+  and replies with numbered citations and a Sources list. The citations are
+  links in the app.
+- **Live weather** from Open-Meteo, no API key: *"do I need an umbrella
+  tomorrow?"*
+- **Research reports:** *"research X and write me a Word doc"* → a `.docx`
+  with its sources.
+- **Fixed a crash:** reading several pages at once could crash the whole
+  backend mid-answer (two threads sharing trafilatura's lxml parser). Pages
+  still download in parallel but are parsed one at a time.
+
+## Your phone [8c16c6d, 96a2b89, d5056af]
+
+- **"Send that to me"** at the Mac sends the answer you just got to Telegram;
+  *"send me the whole chat"*; *"put that in a document and send it to me"*.
+  An answer that made a document sends the document.
+- "Write a document and send it to me" no longer gets stuck: the file is
+  made before it's sent.
+- **No more repeating itself** — after sending something, it confirms in a
+  line instead of saying it all again.
+- A message cut off by a restart is offered back.
+
+## Apple Music [2cb2059]
+
+- **"Play Janice STFU by Drake"** plays any song in the Apple Music
+  catalogue, not just your library (subscription needed), using *Play Next*
+  so nothing is added to your library. Music requests go to Apple Music
+  unless you say YouTube or video.
+
+## Smart lights (Tapo / Kasa) [2cb2059, d5056af, f46a72f, 96fceb2]
+
+- **"Lights off", "dim the lights", "make the bedroom light blue",
+  "warm white at 40%"** — instantly, and in routines ("lights off at 11pm
+  every night"). Controls on the Core screen and in Settings → Smart lights.
+- Your Tapo password is used once and never stored — only a per-light key.
+- Talks to the lights on your Wi-Fi, so Alexa keeps working; cameras are
+  left alone; a light that changes address is found again.
+- Works around a macOS bug that blocks some apps from the local network
+  without asking: the lights are reached through a small helper macOS
+  lists as *Python*. Clear messages for a blocked network and for Tapo's
+  *Third-Party Compatibility* switch.
+
+## A redesign [c180845, a4464da]
+
+- Calmer, clearer screens that keep the green look: new sidebar, **⌘K**
+  command palette, page headers, empty states, toasts.
+- Setup check with a progress ring and a matching badge; searchable tool
+  permissions instead of a 13,000-pixel settings page; a section menu in
+  Settings that follows where you are.
+- Chat: answers with source cards, readable folder listings, clearer steps.
+- An updated Jarvis no longer shows its old screens for a while after an
+  update (the page is re-checked on every load).
+
+## Honest and dependable [df4a908, 7b372ce, ba38d24]
+
+- Never claims it sent or saved something no tool did — it's pushed to do
+  it, and a claim that survives is cut.
+- Respects a *"no"*: nothing pushes it to act anyway.
+- Reminder times are kept (*"remind me at 6"*, in Arabic too).
+- Chat titles see the answer, so "MCP servers" isn't titled "Minecraft".
+- 90 real requests in the eval suite.
+
+## A real Mac app [92a5cd6, 8d3e023, 2740966, ada422a, e8a953e]
+
+- `npm run install-app` builds **Jarvis.app** with its icon, installs it,
+  starts Ollama, opens at login, and only ever runs once.
+- **Permissions stick:** signed with a local certificate made once on your
+  Mac, so granted permissions survive rebuilds; a restart button when macOS
+  needs one.
+- Calendar and Reminders can be granted (the app says why it needs them).
+- Setup check says exactly which app to switch on in System Settings.
+
+## Doing things on your Mac [a368f97, cf35855, ca7bd3b, 86d6f27, 8fd2914, 91382f0, fbe7f96, a74f237]
+
+- **Full control of any app** through Accessibility (buttons, fields, keys,
+  scrolling, dragging); **Esc** or "stop" is the emergency stop; password
+  managers, System Settings, terminals and banking sites are off-limits.
+- A glowing frame around the screen whenever Jarvis reads or controls it.
+- **Routines & triggers:** daily/weekday times, every N minutes, when an
+  email arrives, before meetings — results to Telegram, a notification or
+  spoken.
+- **"This" means what you're looking at:** "email this to Sam",
+  "summarize this page".
+- Instant timers, reminders, volume and sums with no model call.
+- People memory ("email my landlord"), document tools (read, compare,
+  Excel, PowerPoint, PDF forms), the **"About you"** profile and form
+  filling, macOS Shortcuts, an activity log with **undo**.
+- "Text John…" always drafts an iMessage, never sends it.
+
+## Voice and vision [a368f97, 0cf5387, 623cf47, e998048, 86cf2c9]
+
+- Reliable offline wake word (Whisper small.en: 25/25 on noisy audio, no
+  false wakes); talk over Jarvis to interrupt; short spoken answers.
+- **Arabic:** commands, replies and voice.
+- **Voice lock** (experimental): only answer the enrolled voice.
+- Vision on **qwen3.5** (8/8 on test questions vs llava's 4/8), faster with
+  shrunk images; the camera works through the app.
+- **Proactive help:** offers a hand when the same error stays on screen
+  (opt-in).
+
+## Speed [ca7bd3b, 86d6f27, 8fd2914]
+
+- Only the tools a request needs go into the prompt, and every request
+  opens with the same cached prompt: median time to the first word fell
+  from 8.0 s to 5.8 s. Long conversations are summarized in the background.
+
+---
+
+# Earlier — the phone, speed and email
+
+Eleven commits on top of `d719a39` ("Revise README for clarity and updated
+instructions"), 59 files (+5,518 / −523 lines).
 
 ## 1. Text Jarvis from your phone (Telegram) [12cde49]
 

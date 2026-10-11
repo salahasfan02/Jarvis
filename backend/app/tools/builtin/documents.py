@@ -221,6 +221,8 @@ def markdown_to_docx(title: str, markdown: str, path: Path) -> int:
 def create_word_document(title: str, content: str, filename: str = "") -> str:
     path = _unique_path(DOCS_DIR, _slug(filename or title))
     words = markdown_to_docx(title.strip() or "Document", content, path)
+    from ... import activity
+    activity.offer_undo(kind="remove_created", path=str(path))
     return (f"Created Word document '{title}' ({words} words) at {path}. "
             "If the user wants it on their phone, call send_file with this path.")
 
@@ -228,8 +230,9 @@ def create_word_document(title: str, content: str, filename: str = "") -> str:
 def _name_key(name: str) -> str:
     """Compare file names the way a person would. macOS writes screenshot times
     as 23.55.30 with a narrow no-break space before AM/PM; models write 23:55:30
-    with plain spaces, often without the extension."""
-    return re.sub(r"[\s\u202f\u00a0]+", " ", name.lower().replace(":", ".")).strip()
+    with plain spaces, often without the extension. Dashes and underscores
+    count as spaces: "Shopping List.docx" is shopping-list.docx."""
+    return re.sub(r"[\s\u202f\u00a0_-]+", " ", name.lower().replace(":", ".")).strip()
 
 
 def _mtime(p: Path) -> float:
@@ -265,6 +268,53 @@ def resolve_path(path: str) -> tuple[Path | None, list[str]]:
     return None, list(dict.fromkeys([c.name for c in containing] + close))[:5]
 
 
+_SKIP_PARTS = {"Library", ".Trash", "node_modules", ".venv", "venv", "__pycache__",
+               ".git", "site-packages"}
+
+
+def _spotlight(name: str) -> list[Path]:
+    """Files named like `name` anywhere in the home folder, newest first,
+    leaving out caches, app data and code dependencies."""
+    try:
+        out = subprocess.run(["mdfind", "-onlyin", str(Path.home()), "-name", name],
+                             capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    home = Path.home()
+    hits = [Path(line) for line in out.splitlines()[:400] if line]
+    hits = [h for h in hits if h.is_relative_to(home)
+            and not _SKIP_PARTS.intersection(h.parts)
+            and not any(part.startswith(".") for part in h.relative_to(home).parts)]
+    return sorted(hits, key=_mtime, reverse=True)
+
+
+def find_file(query: str) -> tuple[Path | None, list[str]]:
+    """The file the user means — a full path, or just a name ("my CV",
+    "lease.pdf", "the Spain folder"). Desktop, Downloads and Documents first,
+    then Spotlight across the home folder. Returns (path, []) when there is one
+    clear match, else (None, candidate paths for the user to choose from)."""
+    query = query.strip().strip("'\"")
+    p, suggestions = resolve_path(query)
+    if p is not None:
+        return p, []
+    name = Path(query).name
+    key, stem = _name_key(name), _name_key(Path(name).stem)
+    hits = _spotlight(Path(name).stem if len(Path(name).stem) >= 3 else name)
+    exact = [h for h in hits if key in (_name_key(h.name), _name_key(h.stem))
+             or stem == _name_key(h.stem)]
+    if len(exact) == 1:
+        return exact[0], []
+    if len(hits) == 1:
+        return hits[0], []
+    candidates = [str(h) for h in (exact or hits)[:8]]
+    if not candidates:
+        home = Path.home()
+        candidates = [str(home / d / s) for s in suggestions
+                      for d in ("Desktop", "Downloads", "Documents")
+                      if (home / d / s).exists()][:8]
+    return None, candidates
+
+
 def _folder_size(folder: Path, limit: int) -> int:
     """Total size of a folder, stopping early once it passes `limit`."""
     total = 0
@@ -278,9 +328,9 @@ def _folder_size(folder: Path, limit: int) -> int:
 
 @tool(
     name="send_file",
-    description="Send a file (or a whole folder, zipped) from this Mac to the user's phone, "
-                "in the chat they're messaging from. Needs the exact path: find it first "
-                "with search_files or list_directory if unsure. Max 50 MB.",
+    description="Send a file (or a whole folder, zipped) from this Mac to the user's phone "
+                "on Telegram — 'send me my CV', 'send it to me'. Needs the exact path: find "
+                "it first with search_files or list_directory if unsure. Max 50 MB.",
     parameters={
         "type": "object",
         "properties": {
@@ -290,7 +340,6 @@ def _folder_size(folder: Path, limit: int) -> int:
         "required": ["path"],
     },
     risk="confirm",          # the user sees exactly which file leaves the Mac
-    agent_tags=["remote"],   # offered on phone turns (and to the all-tools planner)
 )
 async def send_file(path: str, caption: str = "") -> str:
     p, suggestions = await asyncio.to_thread(resolve_path, path)
@@ -300,13 +349,16 @@ async def send_file(path: str, caption: str = "") -> str:
                 "path with search_files or list_directory, then call send_file again.")
     channel = channels.current.get()
     if channel is None:
-        # Chatting at the Mac: there is no phone to send to, so show it instead.
-        try:
-            subprocess.run(["open", "-R", str(p)], timeout=10)
-        except (OSError, subprocess.SubprocessError):
-            pass
-        return (f"The user is at the Mac, so nothing was sent — {p} was revealed in "
-                "Finder instead.")
+        # At the Mac, "send it to me" means the user's phone.
+        from ...channels import telegram
+        channel = telegram.owner()
+        if channel is None:
+            try:
+                subprocess.run(["open", "-R", str(p)], timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            return (f"Nothing was sent — {telegram.why_not_owner()} {p} was shown in "
+                    "Finder instead.")
 
     limit = channel.max_file_bytes
     if p.is_dir():

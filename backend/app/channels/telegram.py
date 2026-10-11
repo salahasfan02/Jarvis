@@ -56,6 +56,9 @@ HELP = (
 
 TOOL_LABELS = {
     "web_search": "🔎 Searching the web",
+    "research": "🔎 Researching on the web",
+    "research_report": "📝 Researching and writing your document",
+    "weather": "🌤 Checking the weather",
     "web_fetch": "📖 Reading a page",
     "search_files": "🗂 Looking for files",
     "list_directory": "🗂 Looking in a folder",
@@ -121,6 +124,8 @@ def _load_state() -> dict:
         state = {}
     state.setdefault("offset", 0)
     state.setdefault("conversations", {})
+    state.setdefault("unfinished", {})   # chat -> message being answered right now
+    state.setdefault("resumable", {})    # id -> a message offered back after a restart
     return state
 
 
@@ -229,6 +234,7 @@ def _speakable(text: str) -> str:
     text = re.split(r"\n\s*(?:#+\s*)?\**sources:?\**\s*\n", text, flags=re.I)[0]
     text = re.sub(r"```.*?```", " (code omitted) ", text, flags=re.S)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"\s?\[\d+(?:[,–-]\s?\d+)*\]", "", text)     # citation markers
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"[*_`#>|]+", "", text)
     return re.sub(r"\s+", " ", text).strip()
@@ -335,6 +341,45 @@ class TelegramSession(ChannelSession):
         audit.log("telegram_file_sent", path=str(path), bytes=len(data))
         return f"Sent {path.name} ({len(data) // 1024} KB) to the user's phone via Telegram."
 
+    async def send_text(self, text: str) -> str:
+        try:
+            await self.bot.send_markdown(self.chat_id, text)
+        except (TelegramError, httpx.HTTPError) as e:
+            return f"Could not send it: {_redact(str(e))}"
+        audit.log("telegram_text_sent", chars=len(text))
+        return "Sent to your phone on Telegram."
+
+
+class OwnerSession(ChannelSession):
+    """"Send it to me" said at the Mac: the paired phone(s), on Telegram."""
+    name = "Telegram"
+
+    def __init__(self, bot: "TelegramBot", chats: list[int]) -> None:
+        self.sessions = [TelegramSession(bot, c) for c in chats]
+
+    async def send_file(self, path: Path, caption: str = "") -> str:
+        results = [await s.send_file(path, caption) for s in self.sessions]
+        return next((r for r in results if r.startswith("Could not")), results[0])
+
+    async def send_text(self, text: str) -> str:
+        results = [await s.send_text(text) for s in self.sessions]
+        return next((r for r in results if r.startswith("Could not")), results[0])
+
+
+def owner() -> OwnerSession | None:
+    """Where "send it to me" goes from the Mac, or None if no phone is set up."""
+    chats = [int(u["id"]) for u in allowed_users() if u.get("id")]
+    return OwnerSession(_bot, chats) if _bot is not None and chats else None
+
+
+def why_not_owner() -> str:
+    if not read_token():
+        return ("Telegram isn't set up, so there's no phone to send it to — connect it in "
+                "Settings → Phone.")
+    if _bot is None:
+        return "Telegram is switched off — turn it on in Settings → Phone to get things on your phone."
+    return "No phone is paired with Telegram yet — pair one in Settings → Phone."
+
 
 # --- the bot ----------------------------------------------------------------------
 
@@ -351,6 +396,7 @@ class TelegramBot:
         self._pending: dict[int, dict] = {}       # chat -> open confirmation
         self._warned: set[int] = set()
         self._side_tasks: set[asyncio.Task] = set()
+        self._stopping = False
 
     @property
     def running(self) -> bool:
@@ -375,8 +421,32 @@ class TelegramBot:
             pass  # cosmetic
         self.username = me.get("username", "")
         audit.log("telegram_started", bot=self.username)
+        await self._offer_unfinished()
+
+    async def _offer_unfinished(self) -> None:
+        """Messages Jarvis was still answering when it quit or restarted. They
+        aren't silently dropped — nor re-run blindly (half of it may already
+        have happened, like an email sent): the user gets a button to run it."""
+        unfinished, self.state["unfinished"] = self.state.get("unfinished", {}), {}
+        for chat, item in unfinished.items():
+            if time.time() - item.get("at", 0) > 24 * 3600:
+                continue
+            rid = secrets.token_hex(4)
+            self.state["resumable"][rid] = {"chat": int(chat), "text": item["text"],
+                                            "voice": item.get("voice", False)}
+            quoted = item["text"] if len(item["text"]) <= 120 else item["text"][:117] + "…"
+            try:
+                await self.api.call(
+                    "sendMessage", chat_id=int(chat),
+                    text=f"↩️ I restarted before I finished answering:\n“{quoted}”",
+                    reply_markup={"inline_keyboard": [[
+                        {"text": "▶️ Answer it now", "callback_data": f"resume:{rid}"}]]})
+            except (TelegramError, httpx.HTTPError):
+                pass
+        _save_state(self.state)
 
     async def stop(self) -> None:
+        self._stopping = True    # turns cut short now stay "unfinished" for next time
         tasks = [t for t in (self._poller, *self._workers.values(), *self._turns.values(),
                              *self._side_tasks) if t]
         for t in tasks:
@@ -575,7 +645,10 @@ class TelegramBot:
         attached = ""
         try:
             from ..knowledge import attachments
-            await attachments.ingest(conv_id, path.name, data)
+            # A photo's caption is usually the question ("what plant is this?"):
+            # let the vision model look for exactly that.
+            await attachments.ingest(conv_id, path.name, data,
+                                     question=(msg.get("caption") or "").strip())
             attached = " Its contents are attached to this conversation."
         except Exception:
             pass
@@ -608,16 +681,26 @@ class TelegramBot:
                 f"{note}\nAcknowledge it briefly and ask what they'd like done with it.")
         if text:
             audit.log("telegram_message", chars=len(text), voice=voice_in)
-            await self._run_turn(chat_id, conv_id, text, voice_in)
+            self.state["unfinished"][str(chat_id)] = {"text": text, "voice": voice_in,
+                                                      "at": time.time()}
+            _save_state(self.state)
+            try:
+                await self._run_turn(chat_id, conv_id, text, voice_in)
+            finally:
+                if not self._stopping:    # answered (or stopped on purpose)
+                    self.state["unfinished"].pop(str(chat_id), None)
+                    _save_state(self.state)
 
     async def _run_turn(self, chat_id: int, conv_id: str, text: str, voice_in: bool) -> None:
+        from .. import ui_bridge
+        ui_bridge.track(asyncio.current_task())   # the emergency stop can cancel it
         session = TelegramSession(self, chat_id)
         token = current.set(session)
         typing = asyncio.create_task(self._keep_typing(chat_id))
         status: dict = {"message_id": None, "steps": []}
         final, failed = "", False
         try:
-            async for event in chat_service.run_chat(conv_id, text):
+            async for event in chat_service.run_chat(conv_id, text, spoken=voice_in):
                 kind = event.get("type")
                 if kind == "tool_start":
                     await self._expire_pending(chat_id)
@@ -698,6 +781,14 @@ class TelegramBot:
         note = None
         if not is_allowed(cq.get("from", {}).get("id")):
             note = "Not authorized"
+        elif verdict == "resume":
+            item = self.state["resumable"].pop(confirm_id, None)
+            _save_state(self.state)
+            if item and item["chat"] == chat_id:
+                self._enqueue(chat_id, {"text": item["text"], "_voice_in": item["voice"]})
+                note = "On it"
+            else:
+                note = "Already answered"
         elif self._pending.get(chat_id, {}).get("id") == confirm_id:
             await self._resolve(chat_id, verdict == "ok")
         else:

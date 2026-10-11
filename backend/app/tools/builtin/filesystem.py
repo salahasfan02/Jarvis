@@ -3,12 +3,16 @@ deletion is always confirmed and only moves items to the Trash (never a
 permanent delete)."""
 from __future__ import annotations
 
+import asyncio
 import datetime
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
+from ... import activity
 from ..base import tool
+from .documents import find_file
 
 
 def _expand(path: str) -> Path:
@@ -46,14 +50,63 @@ def list_directory(path: str, sort: str = "name") -> str:
     p = _expand(path)
     if not p.is_dir():
         return f"Not a directory: {p}"
+    # Hidden files (.DS_Store, .localized) are noise to a person.
+    visible = [e for e in p.iterdir() if not e.name.startswith(".")]
+    # The full list is shown to the user directly (the model reads an excerpt),
+    # so the cap is only a guard against enormous folders.
     if sort == "recent":
-        entries = sorted(p.iterdir(), key=_mtime, reverse=True)
+        entries = sorted(visible, key=_mtime, reverse=True)
         lines = [f"{_stamp(e)}  {'[dir] ' if e.is_dir() else ''}{e.name}"
-                 for e in entries[:100]]
-        return f"{p} ({len(entries)} items, newest first):\n" + "\n".join(lines)
-    entries = sorted(p.iterdir(), key=lambda e: (e.is_file(), e.name.lower()))
-    lines = [f"{'[dir] ' if e.is_dir() else ''}{e.name}" for e in entries[:200]]
-    return f"{p} ({len(entries)} items):\n" + "\n".join(lines)
+                 for e in entries[:LIST_CAP]]
+        head = f"{p} ({len(entries)} items, newest first)"
+    else:
+        entries = sorted(visible, key=lambda e: (e.is_file(), e.name.lower()))
+        lines = [f"{'[dir] ' if e.is_dir() else ''}{e.name}" for e in entries[:LIST_CAP]]
+        head = f"{p} ({len(entries)} items)"
+    if len(entries) > LIST_CAP:
+        head += f" — showing the first {LIST_CAP}"
+    return head + ":\n" + "\n".join(lines)
+
+
+LIST_CAP = 1000
+
+
+# Opening these RUNS something (a script, an installer) — not what "open my
+# file" means, and a wrong guess shouldn't execute code.
+_RUNS_CODE = {".command", ".sh", ".zsh", ".bash", ".tool", ".pkg", ".mpkg", ".workflow",
+              ".scpt", ".applescript", ".jar", ".py", ".rb", ".pl", ".terminal", ".exe"}
+
+
+@tool(
+    name="open_file",
+    description="Open a file or folder on this Mac in its default app — a PDF in Preview, "
+                "a .docx in Word/Pages, a photo, a video, or a folder in Finder. Give a full "
+                "path OR just the name the user said (\"my CV\", \"lease.pdf\", \"the Spain "
+                "folder\"): it searches Desktop, Downloads, Documents, then the whole home "
+                "folder. For applications use open_app.",
+    parameters={
+        "type": "object",
+        "properties": {"path": {"type": "string",
+                                "description": "full path, or the file/folder name"}},
+        "required": ["path"],
+    },
+    agent_tags=["files", "automation"],
+)
+async def open_file(path: str) -> str:
+    p, candidates = await asyncio.to_thread(find_file, path)
+    if p is None:
+        if candidates:
+            return ("Several files could match — ask the user which one, then call "
+                    "open_file with its full path:\n" + "\n".join(candidates))
+        return f"No file or folder called '{path}' was found on this Mac."
+    if p.suffix.lower() in _RUNS_CODE or (
+            p.is_file() and not p.suffix and os.access(p, os.X_OK)):
+        return (f"{p} is a script or installer — opening it would run it, so I didn't. "
+                "The user can open it themselves in Finder.")
+    result = subprocess.run(["open", str(p)], capture_output=True, text=True, timeout=15)
+    if result.returncode != 0:
+        return f"Couldn't open {p}: {result.stderr.strip()}"
+    return f"Opened {p}"
 
 
 @tool(
@@ -90,6 +143,10 @@ def read_file(path: str) -> str:
 def write_file(path: str, content: str) -> str:
     p = _expand(path)
     p.parent.mkdir(parents=True, exist_ok=True)
+    if p.is_file():
+        activity.offer_undo(kind="restore_backup", path=str(p), backup=activity.backup(p))
+    else:
+        activity.offer_undo(kind="remove_created", path=str(p))
     p.write_text(content)
     return f"Wrote {len(content)} characters to {p}"
 
@@ -106,6 +163,8 @@ def write_file(path: str, content: str) -> str:
 )
 def create_folder(path: str) -> str:
     p = _expand(path)
+    if not p.exists():
+        activity.offer_undo(kind="remove_folder", path=str(p))
     p.mkdir(parents=True, exist_ok=True)
     return f"Created folder {p}"
 
@@ -126,7 +185,9 @@ def move_file(source: str, destination: str) -> str:
     if not src.exists():
         return f"Source does not exist: {src}"
     dst.parent.mkdir(parents=True, exist_ok=True)
+    final = dst / src.name if dst.is_dir() else dst
     shutil.move(str(src), str(dst))
+    activity.offer_undo(kind="move_back", now=str(final), was=str(src))
     return f"Moved {src} -> {dst}"
 
 
@@ -150,6 +211,7 @@ def trash_file(path: str) -> str:
                             capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
         return f"Failed to trash: {result.stderr.strip()}"
+    activity.offer_undo(kind="restore_from_trash", was=str(p))
     return f"Moved {p} to Trash"
 
 

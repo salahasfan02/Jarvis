@@ -15,11 +15,44 @@ from ..base import tool
 
 
 def _osascript(script: str, timeout: int = 30) -> str:
-    result = subprocess.run(["osascript", "-e", script],
-                            capture_output=True, text=True, timeout=timeout)
+    try:
+        result = subprocess.run(["osascript", "-e", script],
+                                capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        app = re.search(r'tell application "([^"]+)"', script)
+        name = app.group(1) if app else "The app"
+        return (f"Failed: {name} didn't respond within {timeout} s — nothing was done. "
+                f"macOS may be showing a dialog asking to let Jarvis control {name} "
+                "(click OK), or the app is busy. Tell the user, then try again.")
     if result.returncode != 0:
         return f"AppleScript error: {result.stderr.strip()}"
     return result.stdout.strip() or "OK"
+
+
+def as_date(var: str, dt) -> str:
+    """AppleScript lines that set `var` to datetime `dt`, built from its parts.
+    `date "2026-10-11 18:00"` depends on the Mac's region: on a UK Mac it
+    became 17 April 2017, and Calendar's format failed outright."""
+    return (f"set {var} to current date\n"
+            f"set day of {var} to 1\n"            # no month overflow (31 Jan -> Feb)
+            f"set year of {var} to {dt.year}\n"
+            f"set month of {var} to {dt.month}\n"
+            f"set day of {var} to {dt.day}\n"
+            f"set hours of {var} to {dt.hour}\n"
+            f"set minutes of {var} to {dt.minute}\n"
+            f"set seconds of {var} to 0\n")
+
+
+def parse_when(text: str):
+    """'2026-10-11 18:00' (or with T / seconds) -> datetime, else None."""
+    import datetime
+    text = (text or "").strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _q(s: str) -> str:
@@ -215,19 +248,14 @@ def append_note(title: str, text: str) -> str:
 )
 def calendar_create_event(title: str, start: str, end: str = "", location: str = "") -> str:
     import datetime
-    try:
-        start_dt = datetime.datetime.strptime(start, "%Y-%m-%d %H:%M")
-        end_dt = (datetime.datetime.strptime(end, "%Y-%m-%d %H:%M") if end
-                  else start_dt + datetime.timedelta(hours=1))
-    except ValueError:
+    start_dt = parse_when(start)
+    end_dt = parse_when(end) if end else (start_dt + datetime.timedelta(hours=1) if start_dt else None)
+    if start_dt is None or end_dt is None:
         return "Invalid date format — use YYYY-MM-DD HH:MM."
-    fmt = "%A, %B %d, %Y %H:%M:%S"  # AppleScript-friendly
     props = f'summary:"{_q(title)}", start date:startD, end date:endD'
     if location:
         props += f', location:"{_q(location)}"'
-    script = f'''
-    set startD to date "{start_dt.strftime(fmt)}"
-    set endD to date "{end_dt.strftime(fmt)}"
+    script = as_date("startD", start_dt) + as_date("endD", end_dt) + f'''
     tell application "Calendar"
         tell calendar 1
             make new event with properties {{{props}}}
@@ -252,10 +280,15 @@ def calendar_create_event(title: str, start: str, end: str = "", location: str =
 def create_reminder(title: str, due: str = "") -> str:
     props = f'{{name:"{_q(title)}"}}'
     if due:
-        return _osascript(
-            f'set dueDate to date "{_q(due)}"\n'
-            f'tell application "Reminders" to make new reminder with properties '
-            f'{{name:"{_q(title)}", due date:dueDate}}')
+        when = parse_when(due)
+        if when is None:
+            return "Invalid due date — use YYYY-MM-DD HH:MM."
+        out = _osascript(
+            as_date("dueDate", when)
+            + f'tell application "Reminders" to make new reminder with properties '
+            f'{{name:"{_q(title)}", due date:dueDate, remind me date:dueDate}}')
+        return out if out.startswith(("AppleScript error", "Failed")) else \
+            f"Reminder set: {title} — {when:%a %d %b at %H:%M}."
     return _osascript(
         f'tell application "Reminders" to make new reminder with properties {props}')
 
@@ -321,27 +354,62 @@ def _email_parts(to: str, cc: str, attachments: list[str] | None
     to_list, cc_list = _addresses(to), _addresses(cc)
     if not to_list:
         return [], [], [], "No recipient given."
+    # "Sam" / "my landlord" -> their saved (or Contacts) address.
+    from ...memory import people
+    for lst in (to_list, cc_list):
+        for i, who in enumerate(lst):
+            if _EMAIL.fullmatch(who):
+                continue
+            email, options = people.resolve_email(who)
+            if email:
+                lst[i] = email
+            elif options:
+                return [], [], [], (f"Several people could be '{who}' — ask the user which:\n"
+                                    + "\n".join(people.describe(o) for o in options[:6]))
     bad = [a for a in to_list + cc_list if not _EMAIL.fullmatch(a)]
     if bad:
         return [], [], [], (f"Not an email address: {', '.join(bad)}. Find the address "
                             "(e.g. search the user's contacts or ask them) and try again.")
-    files = [Path(a).expanduser() for a in attachments or []]
-    missing = [str(f) for f in files if not f.is_file()]
-    if missing:
-        return [], [], [], f"Attachment not found: {', '.join(missing)}."
+    files, error = resolve_attachments(attachments)
+    if error:
+        return [], [], [], error
     return to_list, cc_list, files, ""
+
+
+def resolve_attachments(attachments: list[str] | str | None) -> tuple[list[Path], str]:
+    """Attachment paths OR names ("my CV", "lease.pdf", the path
+    create_word_document returned) -> files. Folders can't be attached."""
+    from .documents import find_file
+    if isinstance(attachments, str):   # models often pass one path as a plain string
+        attachments = [attachments] if attachments.strip() else []
+    files: list[Path] = []
+    for item in attachments or []:
+        p, candidates = find_file(item)
+        if p is None:
+            if candidates:
+                return [], (f"Several files could be '{item}' — ask the user which one, "
+                            "then retry with its full path:\n" + "\n".join(candidates))
+            return [], f"Attachment not found: {item}."
+        if p.is_dir():
+            return [], f"{p} is a folder — attach the files inside it instead."
+        files.append(p)
+    return files, ""
 
 
 _EMAIL_PARAMS = {
     "type": "object",
     "properties": {
-        "to": {"type": "string", "description": "email address(es), comma-separated"},
+        "to": {"type": "string", "description": "email address(es), comma-separated — or "
+                                         "a saved person's name/relation (\"Sam\", \"my landlord\")"},
         "subject": {"type": "string"},
         "body": {"type": "string", "description": "plain-text body, signed with the "
                                                   "user's name (no placeholders)"},
         "cc": {"type": "string", "description": "optional, comma-separated"},
         "attachments": {"type": "array", "items": {"type": "string"},
-                        "description": "optional file paths to attach"},
+                        "description": "optional files to attach: full paths, or just the "
+                                       "names the user said (\"my CV\") — they're found "
+                                       "on the Mac. To send a new document, create it "
+                                       "first (create_word_document) and attach that path."},
     },
     "required": ["to", "subject", "body"],
 }
@@ -358,10 +426,9 @@ _EMAIL_PARAMS = {
 def draft_email(to: str, subject: str, body: str, cc: str = "",
                 attachments: list[str] | None = None) -> str:
     # Drafts may name a contact ("Mom"): Mail resolves names in the open window.
-    files = [Path(a).expanduser() for a in attachments or []]
-    missing = [str(f) for f in files if not f.is_file()]
-    if missing:
-        return f"Attachment not found: {', '.join(missing)}."
+    files, error = resolve_attachments(attachments)
+    if error:
+        return error
     out = _osascript(_mail_script(_addresses(to) or [to], subject, body,
                                   _addresses(cc), files, send=False))
     if out != "ok":

@@ -8,7 +8,7 @@
  * Dev:  npm start          (loads http://localhost:5173 from `npm run dev`)
  * Prod: build the frontend first (npm run build in ../frontend), then package.
  */
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, nativeImage, screen, shell } = require("electron");
 
 // The wake word needs audio running without a click first, and the listener
 // must keep working while the window is hidden or behind other apps.
@@ -18,11 +18,14 @@ const fs = require("fs");
 const http = require("http");
 const os = require("os");
 const path = require("path");
+const { startScreenActivityFrame } = require("./overlay.cjs");
 
 const DEV_URL = "http://localhost:5173";
-// Packaged builds carry the UI in renderer/; dev loads Vite or the repo build.
+// Packaged builds carry the UI in Contents/Resources/renderer — a real folder,
+// not inside app.asar, because the Python backend serves it and can't read asar.
+// Dev loads Vite or the repo build.
 const PROD_INDEX = app.isPackaged
-  ? path.join(__dirname, "renderer", "index.html")
+  ? path.join(process.resourcesPath, "renderer", "index.html")
   : path.join(__dirname, "..", "frontend", "dist", "index.html");
 
 // The Python backend lives in the repo, not inside the .app. Resolution order:
@@ -76,7 +79,18 @@ function startBackend() {
 function loadFromBackend(win, url = APP_URL, tries = 0) {
   checkBackend((up) => {
     if (win.isDestroyed()) return;
-    if (up) return win.loadURL(url);
+    if (up) {
+      // A backend started some other way (e.g. an old copy) may not serve the UI.
+      return http.get(url, (res) => {
+        res.resume();
+        if (res.statusCode !== 404) return win.loadURL(url);
+        win.loadURL("data:text/html," + encodeURIComponent(
+          "<body style='background:#000;color:#3f6;font:14px monospace;display:grid;" +
+          "place-items:center;height:100vh;margin:0;text-align:center'><div>" +
+          "Another Jarvis backend is running without the interface.<br><br>" +
+          "Quit any other Jarvis (or <code>npm start</code>) and reopen this one.</div></body>"));
+      }).on("error", () => win.loadURL(url));
+    }
     if (tries === 0) {
       win.loadURL("data:text/html," + encodeURIComponent(
         "<body style='background:#000;color:#3f6;font:14px monospace;display:grid;" +
@@ -105,7 +119,8 @@ function createMainWindow() {
     vibrancy: "under-window",
     visualEffectState: "active",
     backgroundColor: "#00000000",
-    webPreferences: { contextIsolation: true, backgroundThrottling: false },
+    webPreferences: { contextIsolation: true, backgroundThrottling: false,
+                      preload: path.join(__dirname, "main-preload.cjs") },
   });
   loadUI(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -114,6 +129,29 @@ function createMainWindow() {
   });
   mainWindow.on("closed", () => (mainWindow = null));
 }
+
+// Moving the window by the page's title strip: follow the pointer from
+// press to release (the page reports both).
+let dragTimer = null;
+ipcMain.on("window-drag", (event, what) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  clearInterval(dragTimer);
+  dragTimer = null;
+  if (!win || win.isDestroyed()) return;
+  if (what === "zoom") {
+    win.isMaximized() ? win.unmaximize() : win.maximize();
+    return;
+  }
+  if (what !== "start") return;
+  const start = screen.getCursorScreenPoint();
+  const [wx, wy] = win.getPosition();
+  const stopAt = Date.now() + 60_000;   // never follow the pointer forever
+  dragTimer = setInterval(() => {
+    if (win.isDestroyed() || Date.now() > stopAt) { clearInterval(dragTimer); return; }
+    const p = screen.getCursorScreenPoint();
+    win.setPosition(wx + p.x - start.x, wy + p.y - start.y);
+  }, 8);
+});
 
 function toggleFloatWindow() {
   if (floatWindow && !floatWindow.isDestroyed()) {
@@ -239,12 +277,72 @@ ipcMain.handle("quick-capture-screen", async () => {
   return text;
 });
 
+// One Jarvis at a time: opening it again just brings the window forward.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow) return createMainWindow();
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
+// Every reply needs Ollama: start it if it isn't running (and is installed).
+function ensureOllama() {
+  http.get("http://127.0.0.1:11434/api/version", () => {})
+    .on("error", () => {
+      if (fs.existsSync("/Applications/Ollama.app")) spawn("open", ["-g", "-a", "Ollama"]);
+    });
+}
+
+// Links in answers (sources, search results) open in the user's browser —
+// never inside a Jarvis window, which would replace Jarvis with the website.
+const OWN_PAGES = ["http://127.0.0.1:8765", "http://localhost:8765", DEV_URL,
+                   "http://127.0.0.1:5173", "data:"];
+app.on("web-contents-created", (_e, contents) => {
+  contents.on("will-navigate", (event, url) => {
+    if (OWN_PAGES.some((own) => url.startsWith(own))) return;
+    event.preventDefault();
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+  });
+  contents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+    return { action: "deny" };
+  });
+});
+
+// "Open Jarvis when I log in" (only meaningful for the installed app).
+ipcMain.handle("login-item", (_e, enabled) => {
+  if (typeof enabled === "boolean" && app.isPackaged) {
+    app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true });
+  }
+  return { packaged: app.isPackaged, enabled: app.getLoginItemSettings().openAtLogin };
+});
+
+// Restart Jarvis and its backend: macOS often hands a new permission (Screen
+// Recording, sometimes Accessibility) only to a freshly started process.
+ipcMain.handle("relaunch", async () => {
+  if (backendProc && backendProc.exitCode === null) {
+    // Wait for it to let go of the port, or the new copy would reuse it.
+    const exited = new Promise((resolve) => backendProc.once("exit", resolve));
+    backendProc.kill();
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))]);
+    backendProc = null;
+  }
+  app.relaunch();
+  app.quit();
+});
+
 app.whenReady().then(() => {
+  ensureOllama();
   startBackend();
   createMainWindow();
   createTray();
   globalShortcut.register("CommandOrControl+Shift+J", toggleFloatWindow);
   globalShortcut.register("Alt+Space", toggleQuickWindow);
+  startScreenActivityFrame();   // frame around the screen while Jarvis reads/controls it
 });
 
 app.on("window-all-closed", () => {

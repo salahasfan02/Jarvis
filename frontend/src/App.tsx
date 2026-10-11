@@ -1,15 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowUp, Code, Ear, FileText, Image as ImageIcon, MessageSquare, Mic, Paperclip, Square, X,
+  ArrowUp, Bell, Code, Ear, FileText, Image as ImageIcon, MessageSquare, Mic, PanelLeft, Paperclip,
+  Plus, Square, Upload, X,
 } from "lucide-react";
-import { ChatView, ConfirmModal, ConfirmRequest, ToolChipInfo } from "./components/ChatView";
+import { AGENTS, ChatView, ConfirmModal, ConfirmRequest, ToolChipInfo } from "./components/ChatView";
 import { MatrixRain } from "./components/MatrixRain";
 import { WorldMap } from "./components/WorldMap";
 import { Page, Sidebar } from "./components/Sidebar";
+import { CommandPalette } from "./components/CommandPalette";
+import { Toasts, toast } from "./components/ui";
+import { inkFor } from "./lib/format";
 import { API, api, Attachment, Conversation, expandSkill, Message, Skill, skillsApi } from "./lib/api";
-import { enqueueSpeech, playWakeChime, speechSupported, stopSpeaking, voiceBus, VoiceEngine, WhisperVoiceEngine } from "./lib/voice";
+import { enqueueSpeech, playWakeChime, prewarmPhrases, speechSupported, stopSpeaking, voiceBus, VoiceEngine, WhisperVoiceEngine } from "./lib/voice";
+
+// Said straight away when a spoken request will take a moment (by agent).
+const ACKS: Record<string, string> = {
+  research: "Let me look that up.", files: "Checking your files.", messaging: "One moment.",
+  vision: "Let me take a look.", automation: "On it.", media: "On it.",
+  coding: "Let me think about that.", planner: "Okay, working on it.", general: "One moment.",
+};
 import { ChatEvent, ChatSocket } from "./lib/ws";
+import { requestFrame } from "./lib/camera";
 import { CameraPage } from "./pages/CameraPage";
+import { RoutinesPage } from "./pages/RoutinesPage";
+import { ActivityPage } from "./pages/ActivityPage";
+import { countSetupProblems, SetupPage } from "./pages/SetupPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SkillsPage } from "./pages/SkillsPage";
@@ -22,7 +37,33 @@ export default function App() {
   const [page, setPage] = useState<Page>("core");
   const pageRef = useRef(page);
   pageRef.current = page;
-  const [collapsed, setCollapsed] = useState(false);
+  // The sidebar remembers being collapsed, and folds away on narrow windows.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("jarvis.sidebar") === "collapsed"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("jarvis.sidebar", collapsed ? "collapsed" : "open"); } catch { /* private */ }
+  }, [collapsed]);
+  const [narrow, setNarrow] = useState(() => window.innerWidth < 900);
+  useEffect(() => {
+    const on = () => setNarrow(window.innerWidth < 900);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  const [openWhileNarrow, setOpenWhileNarrow] = useState(false);
+  useEffect(() => { if (!narrow) setOpenWhileNarrow(false); }, [narrow]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [mode, setMode] = useState<"chat" | "code">("chat");
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -38,6 +79,30 @@ export default function App() {
   const [agentName, setAgentName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [announcement, setAnnouncement] = useState<
+    { title: string; text: string; action?: { label: string; prompt: string } | null } | null>(null);
+  // Synthesize the acknowledgment phrases once (and again if the voice changes).
+  useEffect(() => {
+    const v = settings?.voice as any;
+    if (v?.tts_enabled) {
+      prewarmPhrases([...new Set(Object.values(ACKS))],
+                     `${v.tts_engine}|${v.kokoro_voice}|${v.tts_voice}`);
+    }
+  }, [settings?.voice?.tts_enabled, settings?.voice?.tts_voice,
+      (settings?.voice as any)?.kokoro_voice, settings?.voice?.tts_engine]);
+
+  // Anything Jarvis needs but doesn't have (permissions, models): checked
+  // once at start-up and shown as a banner on the Core screen.
+  const [setupProblems, setSetupProblems] = useState(0);
+  useEffect(() => {
+    if (page !== "setup") countSetupProblems().then(setSetupProblems).catch(() => {});
+  }, [page === "setup"]);
+  useEffect(() => {
+    if (!announcement) return;
+    // Offers of help stay up longer than plain announcements.
+    const t = setTimeout(() => setAnnouncement(null), announcement.action ? 60000 : 15000);
+    return () => clearTimeout(t);
+  }, [announcement]);
   const [input, setInput] = useState("");
   const [voiceState, setVoiceState] = useState<"idle" | "listening" | "waiting-wake">("idle");
   const [interim, setInterim] = useState("");
@@ -50,6 +115,8 @@ export default function App() {
   settingsRef.current = settings;
   const streamBuf = useRef("");
   const spokenRef = useRef(0);   // chars of the stream already sent to TTS
+  const ackTimer = useRef<any>(null);
+  const agentIdRef = useRef("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const busyRef = useRef(false);
   busyRef.current = busy;
@@ -67,16 +134,28 @@ export default function App() {
   const speakStreamedSentences = useCallback((flushAll: boolean) => {
     const st = settingsRef.current;
     if (!st?.voice?.tts_enabled) return;
-    // Jarvis only speaks on the Core screen — never in the chat/code workspace.
-    if (pageRef.current !== "core") return;
+    // Jarvis speaks on the Core screen (and the Camera tab it opened to look)
+    // — never in the chat/code workspace.
+    if (pageRef.current !== "core" && pageRef.current !== "camera") return;
     // Don't read code aloud: if we're inside an unterminated ``` fence, wait.
-    const soFar = streamBuf.current;
+    // Nor the reference list at the end of a researched answer.
+    const sourcesAt = streamBuf.current.search(/\n\s*(?:\*\*|#+\s*)?(?:Sources|References)\b\s*:?/i);
+    const soFar = sourcesAt >= 0 ? streamBuf.current.slice(0, sourcesAt) : streamBuf.current;
     const fences = (soFar.match(/```/g) || []).length;
     if (!flushAll && fences % 2 === 1) return;
-    const unspoken = streamBuf.current.slice(spokenRef.current);
+    const unspoken = soFar.slice(spokenRef.current);
     let cut = -1;
     if (flushAll) {
       cut = unspoken.length;
+    } else if (spokenRef.current === 0) {
+      // The very first words: start at the first phrase break, so Jarvis
+      // starts talking as early as possible ("Sure, the capital of France…").
+      const re = /[.!?,;:—–][)"'”]?(?=\s)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(unspoken))) {
+        if (m.index + m[0].length >= 18) { cut = m.index + m[0].length; break; }
+      }
+      if (cut < 18) return;
     } else {
       const re = /[.!?][)"'”]?(?=\s|$)/g;
       let m: RegExpExecArray | null;
@@ -84,8 +163,10 @@ export default function App() {
       if (cut < 40) return;   // wait for a meaty chunk; avoids "Dr." fragments
     }
     const chunk = unspoken.slice(0, cut);
-    if (chunk.trim()) {
-      enqueueSpeech(chunk, st.voice.tts_rate, st.voice.tts_voice);
+    // Citation markers and links are for reading, not listening.
+    const said = chunk.replace(/\s?\[\d+(?:[,–-]\s?\d+)*\]/g, "").replace(/https?:\/\/\S+/g, "");
+    if (said.trim()) {
+      enqueueSpeech(said, st.voice.tts_rate, st.voice.tts_voice);
     }
     spokenRef.current += cut;
   }, []);
@@ -113,7 +194,21 @@ export default function App() {
     setStreaming(null);
     setInput("");
     // Deliberately no navigation: talking from the Core stays on the Core.
-    socket.chat(target, content, modeRef.current);
+    // Spoken requests get short, speakable answers.
+    const spoken = lastInputWasVoice.current === true;
+    socket.chat(target, content, modeRef.current, spoken);
+    // If the answer takes more than a moment, say so right away ("Let me look
+    // that up.") — instant commands answer before this fires.
+    clearTimeout(ackTimer.current);
+    agentIdRef.current = "";
+    const st = settingsRef.current;
+    if (spoken && st?.voice?.tts_enabled) {
+      ackTimer.current = setTimeout(() => {
+        if (streamBuf.current || !busyRef.current || agentIdRef.current === "quick") return;
+        if (pageRef.current !== "core" && pageRef.current !== "camera") return;
+        enqueueSpeech(ACKS[agentIdRef.current] ?? "One moment.", st.voice.tts_rate, st.voice.tts_voice);
+      }, 1100);
+    }
   }, [socket]);
 
   // ---- attachments & workspace mode ----
@@ -196,13 +291,42 @@ export default function App() {
             refreshConversations();
           }
           break;
+        case "announce":
+          // A routine or trigger fired: show it, and say it if voice is on.
+          setAnnouncement({ title: e.title, text: e.text, action: e.action });
+          if (e.speak && settingsRef.current?.voice?.tts_enabled) {
+            enqueueSpeech(e.text, settingsRef.current.voice.tts_rate, settingsRef.current.voice.tts_voice);
+          }
+          break;
+        case "ui_request":
+          // A tool needs the window itself, e.g. "open the camera and tell me
+          // what you see": show the Camera tab and hand back a photo.
+          if (e.kind === "camera_frame") {
+            setPage("camera");
+            requestFrame().then(
+              (image) => socket.uiResponse(e.id, { image }),
+              (err: Error) => socket.uiResponse(e.id, { error: err.message }));
+          } else {
+            socket.uiResponse(e.id, { error: `unknown request ${e.kind}` });
+          }
+          break;
         case "agent":
-          setAgentName(e.agent.name);
+          // the same short label the saved message shows ("Research", "Files")
+          setAgentName(AGENTS[e.agent.id] ?? (["general", "quick"].includes(e.agent.id) ? null : e.agent.name));
+          agentIdRef.current = e.agent.id;
           break;
         case "token":
+          clearTimeout(ackTimer.current);
           streamBuf.current += e.content;
           setStreaming(streamBuf.current);
           speakStreamedSentences(false);
+          break;
+        case "reset_text":
+          // The model wrote a tool call as text; the backend ran it as a real
+          // call, so drop that text from the reply.
+          streamBuf.current = e.content;
+          spokenRef.current = Math.min(spokenRef.current, e.content.length);
+          setStreaming(e.content || null);
           break;
         case "tool_start":
           setChips((c) => [...c.filter((x) => !(x.name === e.name && x.status === "running")),
@@ -238,6 +362,7 @@ export default function App() {
             i === e.index ? { ...chip, status: e.status } : chip));
           break;
         case "done": {
+          clearTimeout(ackTimer.current);
           setBusy(false);
           setStreaming(null);
           setChips([]);
@@ -307,11 +432,28 @@ export default function App() {
     const opts = {
       language: "en-US",
       wakeWords: settingsRef.current?.assistant?.wake_words ?? ["jarvis"],
-      onTranscript: (text: string) => { lastInputWasVoice.current = true; sendRef.current(text); },
+      onTranscript: (text: string) => {
+        // "Stop" / "cancel": the emergency stop — halt clicking/typing and
+        // the running reply, don't send it as a new request.
+        if (/^\s*(?:(?:jarvis|hey jarvis)[\s,]+)?(?:stop|cancel|abort|stop it|stop that|stop now)[\s.!]*$/i.test(text)) {
+          stopSpeaking();
+          socket.stop();
+          fetch(`${API}/screen/stop`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ reason: "voice" }) }).catch(() => {});
+          return;
+        }
+        lastInputWasVoice.current = true; sendRef.current(text);
+      },
       onInterim: setInterim,
       onWake: () => {
         stopSpeaking();
         playWakeChime();   // audible confirmation that Jarvis is listening
+        // While the user says the command, make sure the model has the prompt
+        // opening ready (usually cached already; see chat/prefetch.py).
+        fetch(`${API}/chat/prefetch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversation_id: activeIdRef.current }),
+        }).catch(() => {});
       },
       onStateChange: setVoiceState,
       onPermissionDenied: () => setWakeWanted(false),
@@ -329,7 +471,9 @@ export default function App() {
     if (!st?.voice?.conversation_mode || !voice) return;
     if (lastInputWasVoice.current !== true) return;  // only continue voice turns
     voiceBusIdle().then(() => {
-      if (!busyRef.current && pageRef.current === "core") voice.startListening();
+      if (!busyRef.current && (pageRef.current === "core" || pageRef.current === "camera")) {
+        voice.startListening();
+      }
     });
   };
 
@@ -338,6 +482,8 @@ export default function App() {
       voice.update({
         language: settings.voice?.language ?? "en-US",
         wakeWords: settings.assistant?.wake_words ?? ["jarvis"],
+        bargeIn: !!settings.voice?.conversation_mode,
+        multilingual: ((settings.voice as any)?.languages ?? ["en"]).length > 1,
       });
     }
   }, [voice, settings]);
@@ -384,12 +530,14 @@ export default function App() {
     const accent: string = settings?.ui?.accent ?? "";
     if (/^#[0-9a-fA-F]{6}$/.test(accent)) {
       root.style.setProperty("--accent", accent);
+      root.style.setProperty("--accent-ink", inkFor(accent));   // readable text on it
       const r = parseInt(accent.slice(1, 3), 16);
       const g = parseInt(accent.slice(3, 5), 16);
       const b = parseInt(accent.slice(5, 7), 16);
       root.style.setProperty("--core-rgb", `${r}, ${g}, ${b}`);
     } else {
       root.style.removeProperty("--accent");
+      root.style.removeProperty("--accent-ink");
       root.style.removeProperty("--core-rgb");
     }
 
@@ -435,7 +583,8 @@ export default function App() {
     api.deleteConversation(id).then(() => {
       refreshConversations();
       if (id === activeId) newChat();
-    });
+      toast("Chat deleted");
+    }).catch(() => toast("Couldn't delete that chat", "error"));
   };
 
   const editMessage = (m: Message) => {
@@ -482,6 +631,9 @@ export default function App() {
   });
 
   const voiceEnabled = settings?.voice?.enabled !== false && voice !== null;
+  const activeConv = conversations.find((c) => c.id === activeId);
+  const profile = settings?.profile ?? {};
+  const firstName: string = profile.first_name || (profile.full_name ?? "").split(" ")[0] || "";
 
   return (
     <>
@@ -500,44 +652,47 @@ export default function App() {
         busy={busy}
         ollamaUp={ollamaUp}
         model={settings?.ollama?.model ?? ""}
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed((c) => !c)}
+        assistantName={settings?.assistant?.name ?? "Jarvis"}
+        collapsed={narrow ? !openWhileNarrow : collapsed}
+        setupProblems={setupProblems}
+        onToggleCollapse={() => (narrow ? setOpenWhileNarrow((o) => !o) : setCollapsed((c) => !c))}
         onNewChat={newChat}
         onSelect={openConversation}
         onDelete={deleteConversation}
-        onSearch={(q) => refreshConversations(q)}
         onPage={setPage}
+        onOpenPalette={() => setPaletteOpen(true)}
       />
 
       <div className="main">
         {page === "chat" && (
           <div className="workspace"
+               onDragEnter={(e) => { if (e.dataTransfer.types.includes("Files")) setDragging(true); }}
                onDragOver={(e) => e.preventDefault()}
-               onDrop={(e) => { e.preventDefault(); uploadFiles(e.dataTransfer.files); }}>
+               onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
+               onDrop={(e) => { e.preventDefault(); setDragging(false); uploadFiles(e.dataTransfer.files); }}>
             <div className="workspace-header">
-              <div className="mode-toggle">
-                <button className={mode === "chat" ? "active" : ""}
+              <div className="conv-title">
+                {activeConv?.title ?? <span className="muted">New chat</span>}
+              </div>
+              <div className="seg" role="group" aria-label="Mode">
+                <button className={mode === "chat" ? "active" : ""} aria-pressed={mode === "chat"}
                         onClick={() => switchMode("chat")}><MessageSquare /> Chat</button>
-                <button className={mode === "code" ? "active" : ""}
+                <button className={mode === "code" ? "active" : ""} aria-pressed={mode === "code"}
                         onClick={() => switchMode("code")}><Code /> Code</button>
               </div>
-              {mode === "code" && (
-                <span className="workspace-hint">
-                  senior-engineer mode · code blocks are runnable
-                </span>
-              )}
-              <div style={{ flex: 1 }} />
               <select
                 className="project-select"
-                title="Assign this conversation to a project"
-                value={conversations.find((c) => c.id === activeId)?.project_id ?? ""}
+                title="Assign this chat to a project"
+                aria-label="Project"
+                value={activeConv?.project_id ?? ""}
                 onChange={(e) => assignProject(e.target.value)}
               >
                 <option value="">No project</option>
                 {projects.map((p) => (
-                  <option key={p.id} value={p.id}>Project: {p.name}</option>
+                  <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+              <button className="icon-btn" title="New chat" aria-label="New chat" onClick={newChat}><Plus /></button>
             </div>
             <ChatView
               messages={messages}
@@ -550,59 +705,37 @@ export default function App() {
               onCopy={(t) => navigator.clipboard.writeText(t)}
               onSuggestion={(s) => { lastInputWasVoice.current = false; send(s); }}
               assistantName={settings?.assistant?.name ?? "Jarvis"}
+              userName={firstName}
+              mode={mode}
             />
-            {(attachments.length > 0 || uploading) && (
-              <div className="attach-row">
-                {attachments.map((a) => (
-                  <span key={a.id} className="chip">
-                    {a.kind === "image" ? <ImageIcon /> : <FileText />} {a.name}
-                    <button className="chip-x" title="Remove"
-                            onClick={() => api.deleteAttachment(a.id)
-                              .then(() => refreshAttachments(activeIdRef.current))}>
-                      <X className="icon-sm" />
-                    </button>
-                  </span>
-                ))}
-                {uploading && <span className="chip">{uploading}</span>}
-              </div>
-            )}
             <div className="composer-wrap">
               <div className="composer">
-                <button className="icon-btn" title="Attach files or images"
-                        onClick={() => fileInputRef.current?.click()}>
-                  <Paperclip />
-                </button>
-                <input ref={fileInputRef} type="file" multiple style={{ display: "none" }}
-                       onChange={(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
-                {voiceEnabled && (
-                  <button
-                    className={`icon-btn ${voiceState === "listening" ? "recording" : ""}`}
-                    title="Push to talk"
-                    onClick={() => voiceState === "idle" ? voice?.startListening() : voice?.stop()}
-                  >
-                    <Mic />
-                  </button>
-                )}
-                {voiceEnabled && (
-                  <button
-                    className={`icon-btn ${voiceState === "waiting-wake" ? "wake-on" : ""}`}
-                    title={`Wake word ("${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}")`}
-                    onClick={() => voiceState === "waiting-wake" ? voice?.stop() : voice?.startWakeWord()}
-                  >
-                    <Ear />
-                  </button>
+                {(attachments.length > 0 || uploading) && (
+                  <div className="attach-row">
+                    {attachments.map((a) => (
+                      <span key={a.id} className="chip">
+                        {a.kind === "image" ? <ImageIcon className="icon-sm" /> : <FileText className="icon-sm" />} {a.name}
+                        <button className="chip-x" title="Remove" aria-label={`Remove ${a.name}`}
+                                onClick={() => api.deleteAttachment(a.id)
+                                  .then(() => refreshAttachments(activeIdRef.current))}>
+                          <X className="icon-sm" />
+                        </button>
+                      </span>
+                    ))}
+                    {uploading && <span className="chip"><span className="spinner" /> {uploading}</span>}
+                  </div>
                 )}
                 <textarea
                   ref={inputRef}
                   rows={1}
-                  placeholder={busy ? "Thinking…"
-                    : mode === "code" ? "Describe what to build, debug or refactor…"
+                  aria-label="Message"
+                  placeholder={mode === "code" ? "Describe what to build, debug or refactor…"
                     : `Message ${settings?.assistant?.name ?? "Jarvis"}…`}
                   value={input}
                   onChange={(e) => {
                     setInput(e.target.value);
                     e.target.style.height = "auto";
-                    e.target.style.height = Math.min(e.target.scrollHeight, 180) + "px";
+                    e.target.style.height = Math.min(e.target.scrollHeight, 220) + "px";
                   }}
                   onKeyDown={onComposerKey}
                   onPaste={(e) => {
@@ -613,18 +746,52 @@ export default function App() {
                     }
                   }}
                 />
-                {busy ? (
-                  <button className="icon-btn" title="Stop" onClick={() => socket.stop()}><Square /></button>
-                ) : (
-                  <button className="icon-btn primary" title="Send" disabled={!input.trim()}
-                          onClick={() => { lastInputWasVoice.current = false; send(input); }}><ArrowUp /></button>
-                )}
+                <div className="composer-row">
+                  <button className="icon-btn" title="Attach files or images" aria-label="Attach files"
+                          onClick={() => fileInputRef.current?.click()}>
+                    <Paperclip />
+                  </button>
+                  <input ref={fileInputRef} type="file" multiple style={{ display: "none" }}
+                         onChange={(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
+                  {voiceEnabled && (
+                    <button
+                      className={`icon-btn ${voiceState === "listening" ? "recording" : ""}`}
+                      title="Push to talk" aria-label="Push to talk"
+                      onClick={() => voiceState === "idle" ? voice?.startListening() : voice?.stop()}
+                    >
+                      <Mic />
+                    </button>
+                  )}
+                  {voiceEnabled && (
+                    <button
+                      className={`icon-btn ${voiceState === "waiting-wake" ? "wake-on" : ""}`}
+                      title={`Wake word (“${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}”)`}
+                      aria-label="Wake word" aria-pressed={voiceState === "waiting-wake"}
+                      onClick={() => voiceState === "waiting-wake" ? voice?.stop() : voice?.startWakeWord()}
+                    >
+                      <Ear />
+                    </button>
+                  )}
+                  <div className="grow" />
+                  {busy ? (
+                    <button className="icon-btn" title="Stop" aria-label="Stop" onClick={() => socket.stop()}><Square /></button>
+                  ) : (
+                    <button className="icon-btn primary" title="Send" aria-label="Send" disabled={!input.trim()}
+                            onClick={() => { lastInputWasVoice.current = false; send(input); }}><ArrowUp /></button>
+                  )}
+                </div>
               </div>
-              <div className="voice-hint">
-                {voiceState === "waiting-wake" && !interim && `Listening for "${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}"…`}
-                {(voiceState === "listening" || interim) && (interim || "Listening…")}
+              <div className="composer-hint">
+                <span className={voiceState !== "idle" || interim ? "live" : ""}>
+                  {voiceState === "waiting-wake" && !interim
+                    ? `Listening for “${(settings?.assistant?.wake_words ?? ["jarvis"])[0]}”…`
+                    : (voiceState === "listening" || interim) ? (interim || "Listening…")
+                    : mode === "code" ? "Code mode — senior-engineer answers, runnable code blocks" : ""}
+                </span>
+                <span><kbd>Enter</kbd> to send · <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</span>
               </div>
             </div>
+            {dragging && <div className="drop-overlay"><Upload /> Drop files to attach</div>}
           </div>
         )}
         {page === "core" && (
@@ -633,6 +800,10 @@ export default function App() {
             listening={voiceState === "listening"}
             assistantName={settings?.assistant?.name ?? "Jarvis"}
             onCommand={(text) => { lastInputWasVoice.current = false; send(text); }}
+            onStop={() => socket.stop()}
+            onOpenChat={() => (activeId ? openConversation(activeId) : setPage("chat"))}
+            setupProblems={setupProblems}
+            onOpenSetup={() => setPage("setup")}
             lastUser={[...messages].reverse().find((m) => m.role === "user")?.content ?? null}
             reply={busy ? streaming
                         : [...messages].reverse().find((m) => m.role === "assistant")?.content ?? null}
@@ -657,7 +828,14 @@ export default function App() {
         )}
         {page === "projects" && <ProjectsPage onOpenConversation={openConversation} />}
         {page === "skills" && <SkillsPage />}
-        {page === "camera" && <CameraPage speakReplies={settings?.voice?.tts_enabled ?? false} />}
+        {page === "routines" && <RoutinesPage />}
+        {page === "activity" && <ActivityPage />}
+        {page === "setup" && <SetupPage onOpenSettings={() => setPage("settings")} onProblems={setSetupProblems} />}
+        {page === "camera" && (
+          <CameraPage speakReplies={settings?.voice?.tts_enabled ?? false}
+                      jarvisReply={busy ? streaming
+                        : [...messages].reverse().find((m) => m.role === "assistant")?.content ?? null} />
+        )}
         {page === "settings" && <SettingsPage settings={settings} onPatch={patchSettings} />}
         {page === "memory" && <MemoryPage />}
         {page === "dev" && <DevPage />}
@@ -690,6 +868,49 @@ export default function App() {
         )}
       </div>
 
+      {announcement && (
+        <div className="announce" role="status" onClick={() => setAnnouncement(null)}>
+          <div className="announce-title"><Bell /> {announcement.title}</div>
+          <div className="announce-text">{announcement.text}</div>
+          {announcement.action && (
+            <div className="announce-actions">
+              <button className="btn primary" onClick={(ev) => {
+                ev.stopPropagation();
+                const prompt = announcement.action!.prompt;
+                setAnnouncement(null);
+                lastInputWasVoice.current = false;
+                sendRef.current(prompt);
+              }}>{announcement.action.label}</button>
+              <button className="btn" onClick={(ev) => { ev.stopPropagation(); setAnnouncement(null); }}>
+                Not now
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {paletteOpen && (
+        <CommandPalette
+          onClose={() => setPaletteOpen(false)}
+          conversations={conversations}
+          assistantName={settings?.assistant?.name ?? "Jarvis"}
+          onPage={setPage}
+          onOpenConversation={openConversation}
+          onAsk={(text) => {
+            lastInputWasVoice.current = false;
+            if (page === "core" || page === "chat") send(text);
+            else { newChat(); send(text, null); }
+          }}
+          actions={[
+            { id: "new", label: "New chat", icon: Plus, run: newChat },
+            { id: "code", label: "New code session", icon: Code, run: () => { newChat(); setMode("code"); } },
+            { id: "wake", label: voiceState === "waiting-wake" ? "Turn off the wake word" : "Turn on the wake word",
+              icon: Ear, run: toggleWake },
+            { id: "sidebar", label: collapsed ? "Expand the sidebar" : "Collapse the sidebar", icon: PanelLeft,
+              run: () => setCollapsed((c) => !c) },
+          ]}
+        />
+      )}
+      <Toasts />
       {confirm && (
         <ConfirmModal
           request={confirm}

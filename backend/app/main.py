@@ -17,7 +17,9 @@ from .plugins import loader as plugin_loader
 
 # Importing the builtin tool modules registers their tools.
 from .tools.builtin import (  # noqa: F401
-    browser, calendars, documents, filesystem, imessage, macos, mail, music, system, web)
+    browser, calendars, control, documents, filesystem, forms, imessage, macos, mail, music,
+    lights_tools, office, people, phone, research, routine_tools, screen_click, shortcuts,
+    system, timer_tools, weather, web)
 
 
 @asynccontextmanager
@@ -31,6 +33,10 @@ async def lifespan(app: FastAPI):
         journal.start()
     from .channels import telegram
     await telegram.start()  # no-op unless the phone channel is set up
+    from . import routines
+    routines.start()   # scheduled routines and triggers
+    from . import timers
+    timers.restore()   # timers that were running before a restart
     from . import warmup
     warmup.schedule()  # load the chat model, Whisper and Kokoro in the background
     yield
@@ -42,8 +48,9 @@ app = FastAPI(title="Jarvis", version="0.1.0", lifespan=lifespan)
 # Jarvis's own pages: the Vite dev server, and the built UI the backend serves
 # at /app (the desktop app loads that — never file://, whose "null" origin any
 # website can borrow with a sandboxed iframe).
+PORT = int(os.environ.get("JARVIS_PORT", 8765))
 UI_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173",
-              "http://localhost:8765", "http://127.0.0.1:8765"}
+              f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}"}
 
 
 class OriginGuard:
@@ -112,11 +119,26 @@ class SandboxedFiles(StaticFiles):
 app.mount("/projects", SandboxedFiles(directory=str(_projects), html=True), name="projects")
 
 
-# The built UI (npm run build), served same-origin for the desktop app.
-_ui = Path(os.environ.get("JARVIS_UI_DIR")
-           or Path(__file__).resolve().parents[2] / "frontend" / "dist")
-if (_ui / "index.html").is_file():
-    app.mount("/app", StaticFiles(directory=str(_ui), html=True), name="ui")
+# The built UI (npm run build), served same-origin for the desktop app: the copy
+# the app ships with, else the repo's build.
+_ui = next((d for d in (Path(os.environ.get("JARVIS_UI_DIR") or "/nonexistent"),
+                        Path(__file__).resolve().parents[2] / "frontend" / "dist")
+            if (d / "index.html").is_file()), None)
+class UIFiles(StaticFiles):
+    """The page is re-checked on every load — with no Cache-Control, a browser
+    guesses it's still fresh and an updated Jarvis kept showing its old screens.
+    The scripts and styles it names carry a hash of their contents, so those
+    can be kept for good."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = ("public, max-age=31536000, immutable"
+                                             if path.startswith("assets/") else "no-cache")
+        return response
+
+
+if _ui:
+    app.mount("/app", UIFiles(directory=str(_ui), html=True), name="ui")
 
 
 @app.get("/")

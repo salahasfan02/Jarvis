@@ -9,6 +9,7 @@ from pathlib import Path
 
 # Must happen before `app` is imported: config resolves ~/.jarvis at import.
 os.environ["HOME"] = tempfile.mkdtemp(prefix="jarvis-test-home-")
+os.environ["JARVIS_LIGHTS_DIRECT"] = "1"   # fake bulbs live in this process, not the helper
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402
@@ -41,3 +42,36 @@ def _no_background_llm(monkeypatch):
 
     monkeypatch.setattr(ollama_client, "chat_once", chat_once)
     monkeypatch.setattr(ollama_client, "embed", embed)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_input(monkeypatch):
+    """Tests must never press keys or click on the real Mac."""
+    try:
+        import Quartz
+    except ImportError:
+        return
+    monkeypatch.setattr(Quartz, "CGEventPost", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_contacts_lookup(monkeypatch):
+    """Looking people up in the Mac's Contacts app is not for tests."""
+    from app.memory import people
+    monkeypatch.setattr(people, "from_contacts", lambda q: [])
+
+
+@pytest.fixture(autouse=True)
+def _no_real_apps(monkeypatch):
+    """Tests must never open Finder windows, run AppleScript, Shortcuts or
+    screen captures on the real Mac (send_file at the Mac reveals the file in
+    Finder: every test run used to leave a window behind)."""
+    import subprocess
+    real_run = subprocess.run
+    blocked = {"open", "osascript", "shortcuts", "screencapture"}
+
+    def guarded(cmd, *args, **kwargs):
+        if isinstance(cmd, (list, tuple)) and cmd and str(cmd[0]) in blocked:
+            return subprocess.CompletedProcess(cmd, 0, "" if kwargs.get("text") else b"", "")
+        return real_run(cmd, *args, **kwargs)
+    monkeypatch.setattr(subprocess, "run", guarded)

@@ -51,6 +51,10 @@ async def _models() -> None:
         await ollama_client.preload(utility)
     if settings.get("ollama.embedding_model"):
         await ollama_client.embed("warm up")
+    # Read the prompt opening every request shares, so even the first command
+    # after launch only pays for its own words.
+    from .chat import prefetch
+    await prefetch.warm_opening()
 
 
 async def _whisper() -> None:

@@ -27,5 +27,10 @@ class ChannelSession:
     async def send_file(self, path: Path, caption: str = "") -> str:
         raise NotImplementedError
 
+    async def send_text(self, text: str) -> str:
+        raise NotImplementedError
+
 
 current: ContextVar[ChannelSession | None] = ContextVar("jarvis_channel", default=None)
+# The conversation the running turn belongs to ("send me the whole chat").
+conversation: ContextVar[str | None] = ContextVar("jarvis_conversation", default=None)

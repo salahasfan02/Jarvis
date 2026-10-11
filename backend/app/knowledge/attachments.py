@@ -7,6 +7,7 @@ about them. Attachments persist with the conversation until removed.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import tempfile
@@ -62,7 +63,12 @@ def _extract_zip(data: bytes) -> str:
     return "\n".join(parts)
 
 
-async def _describe_image(data: bytes, name: str) -> str:
+def _shrink(data: bytes) -> bytes:
+    from ..vision import ocr
+    return ocr.shrink_for_vision(data)
+
+
+async def _describe_image(data: bytes, name: str, question: str = "") -> str:
     parts = []
     # exact text via Apple Vision OCR
     try:
@@ -85,9 +91,13 @@ async def _describe_image(data: bytes, name: str) -> str:
             from ..llm import ollama_client
             description = await ollama_client.chat_once(
                 [{"role": "user",
-                  "content": "Describe this image thoroughly: contents, layout, "
-                             "any diagrams or UI elements, and anything notable.",
-                  "images": [base64.b64encode(data).decode()]}],
+                  "content": (f"The user asks about this image: {question}\nAnswer that "
+                              "precisely first, then briefly describe the rest of the image."
+                              if question else
+                              "Describe this image thoroughly: contents, layout, "
+                              "any diagrams or UI elements, and anything notable."),
+                  "images": [base64.b64encode(await asyncio.to_thread(
+                      _shrink, data)).decode()]}],
                 model=vision_model)
             if description:
                 parts.append("Visual description:\n" + description[:3000])
@@ -96,10 +106,10 @@ async def _describe_image(data: bytes, name: str) -> str:
     return "\n\n".join(parts) or "(image uploaded — no text or description extracted)"
 
 
-async def ingest(conv_id: str, name: str, data: bytes) -> dict:
+async def ingest(conv_id: str, name: str, data: bytes, question: str = "") -> dict:
     suffix = Path(name).suffix.lower()
     if suffix in IMAGE_EXT:
-        text = await _describe_image(data, name)
+        text = await _describe_image(data, name, question)
         return db.add_attachment(conv_id, name, "image", text[:MAX_TEXT],
                                  image_b64=base64.b64encode(data).decode())
     if suffix == ".docx":
@@ -118,9 +128,14 @@ def prompt_block(conv_id: str) -> str:
     attachments = db.list_attachments(conv_id, with_content=True)
     if not attachments:
         return ""
-    budget = 24000
-    parts = ["The user has attached these files to this conversation:"]
+    # This rides along on EVERY message of the conversation (prompt tokens =
+    # seconds of reading), so: the latest few files, and an excerpt of each.
+    # read_document fetches the full text when a question needs it.
+    attachments = sorted(attachments, key=lambda a: a.get("created_at", 0))[-4:]
+    budget = 12000
+    parts = ["The user has attached these files to this conversation (excerpts — "
+             "read_document gives the full text):"]
     for att in attachments:
         chunk = att["content_text"][: max(1500, budget // len(attachments))]
         parts.append(f"\n=== ATTACHMENT: {att['name']} ({att['kind']}) ===\n{chunk}")
-    return "\n".join(parts)[:26000]
+    return "\n".join(parts)[:13000]

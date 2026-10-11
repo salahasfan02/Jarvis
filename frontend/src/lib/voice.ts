@@ -41,6 +41,8 @@ export interface VoiceOptions {
   onTranscript: (text: string) => void;   // final command text
   onInterim: (text: string) => void;      // live partial text
   onWake: () => void;
+  bargeIn?: boolean;                      // conversation mode: talking over Jarvis interrupts it
+  multilingual?: boolean;                 // commands may be in Arabic (or other languages)
   onStateChange: (state: "idle" | "listening" | "waiting-wake") => void;
   onPermissionDenied?: () => void;        // mic blocked — stop auto-restarting
 }
@@ -244,6 +246,7 @@ class MicSegmenter {
   maxMs = 8000;             // longest utterance before it's cut anyway
   onSegment: (wav: Blob, ms: number) => void = () => {};
   onLevel: (level: number) => void = () => {};
+  onSpeechStart: () => void = () => {};
   onDead: () => void = () => {};
   onSuspended: (suspended: boolean) => void = () => {};
 
@@ -271,8 +274,10 @@ class MicSegmenter {
     this.stop();
     try {
       // Echo cancellation keeps Jarvis's own voice out; auto gain helps quiet speech.
+      // No browser noise suppression: it can clip the soft start of a word
+      // ("Jar-vis"), and Whisper copes with room noise better on its own.
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true },
       });
     } catch {
       return false;
@@ -330,18 +335,19 @@ class MicSegmenter {
     const rms = Math.sqrt(sum / data.length);
     // Speech = clearly above the room's own noise, with a floor so a silent
     // room doesn't turn breathing into "speech".
-    const threshold = Math.max(this.floor * 2.5, 0.0035);
+    const threshold = Math.max(this.floor * 2.5, 0.003);
     this.onLevel(Math.min(1, rms / 0.1));
 
     if (!this.inSpeech) {
       // follow the noise floor: quickly down, slowly up
       this.floor = rms < this.floor ? this.floor * 0.8 + rms * 0.2 : this.floor * 0.995 + rms * 0.005;
       this.preRoll.push(data);
-      const keep = Math.ceil(400 / this.frameMs);   // 0.4 s before speech starts
+      const keep = Math.ceil(600 / this.frameMs);   // 0.6 s before speech starts
       if (this.preRoll.length > keep) this.preRoll.shift();
       this.loudRun = rms > threshold ? this.loudRun + 1 : 0;
       if (this.loudRun >= 2) {
         this.inSpeech = true;
+        this.onSpeechStart();
         this.segment = [...this.preRoll];
         this.segRms = [];
         this.preRoll = [];
@@ -370,6 +376,26 @@ class MicSegmenter {
   }
 }
 
+/** Record one utterance (for setting up the voice lock): resolves with a
+ *  WAV once the speaker pauses, or null after `timeoutMs` of nothing. */
+export function recordUtterance(timeoutMs = 8000): Promise<Blob | null> {
+  return new Promise(async (resolve) => {
+    const mic = new MicSegmenter();
+    mic.silenceMs = 900;
+    let done = false;
+    const finish = (wav: Blob | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      mic.stop();
+      resolve(wav);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    mic.onSegment = (wav, ms) => { if (ms >= 1200) finish(wav); };
+    if (!(await mic.start())) finish(null);
+  });
+}
+
 export class WhisperVoiceEngine {
   private opts: VoiceOptions;
   private mode: "off" | "ptt" | "wake" = "off";
@@ -384,6 +410,8 @@ export class WhisperVoiceEngine {
   constructor(opts: VoiceOptions) {
     this.opts = opts;
     this.mic.onSegment = (wav) => { this.queue.push(wav); this.drain(); };
+    // Someone talks while Jarvis speaks: turn its voice down straight away.
+    this.mic.onSpeechStart = () => { if (isSpeaking()) duckSpeech(true); };
     this.mic.onLevel = (level) => voiceBus.dispatchEvent(new CustomEvent("mic-level", { detail: level }));
     this.mic.onDead = () => this.restartCapture();
     // Browsers keep audio off until the page has been clicked once; say so
@@ -422,16 +450,22 @@ export class WhisperVoiceEngine {
     }
   }
 
-  private async transcribe(blob: Blob, hint = ""): Promise<string> {
+  private async transcribe(blob: Blob, hint = "", command = false): Promise<string> {
     let error = "";
     try {
       const { API } = await import("./api");
-      const res = await fetch(`${API}/stt/transcribe?hint=${encodeURIComponent(hint)}`, {
+      const res = await fetch(`${API}/stt/transcribe?hint=${encodeURIComponent(hint)}`
+                              + (command ? "&command=1" : ""), {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: blob,
       });
       const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (data.rejected === "voice") {
+        // Voice lock: not the enrolled voice (TV, someone else) — ignore it.
+        noteHeard(`(ignored a voice that isn't yours — match ${Math.round((data.score ?? 0) * 100)}%)`, false);
+        return "";
+      }
       if (!data.error) {
         if (voiceDiag.error) diag({ error: "" });
         return data.text ?? "";
@@ -458,9 +492,21 @@ export class WhisperVoiceEngine {
         const command = mode === "ptt" || this.awaitingCommand;
         if (command) this.opts.onInterim("…");
         const hint = this.opts.wakeWords.map((w) => w[0]?.toUpperCase() + w.slice(1)).join(", ");
-        const text = (await this.transcribe(wav, hint)).trim();
+        // Commands go to the multilingual model when Arabic etc. is on; the
+        // wake word is listened for with the (faster, more accurate) English one.
+        let text = (await this.transcribe(wav, hint, command && !!this.opts.multilingual)).trim();
         if (gen !== this.generation) return;
+        if (!command && this.opts.multilingual && findWake(text, this.opts.wakeWords)?.command) {
+          // "Jarvis, <command>" in one breath: hear the command in any language.
+          const again = (await this.transcribe(wav, hint, true)).trim();
+          if (gen !== this.generation) return;
+          if (again) {
+            const m = findWake(again, this.opts.wakeWords);
+            text = m ? again : `jarvis ${again.split(/\s+/).slice(1).join(" ")}`;
+          }
+        }
         noteHeard(text, command || !!findWake(text, this.opts.wakeWords));
+        if (!text && isSpeaking()) duckSpeech(false);
         if (mode === "ptt") this.finishPtt(text);
         else if (mode === "wake") this.onWakeText(text);
       }
@@ -479,9 +525,31 @@ export class WhisperVoiceEngine {
   }
 
   private onWakeText(text: string) {
+    if (isSpeaking() && !this.awaitingCommand) {
+      // Talking over Jarvis. "Jarvis, …" is handled below (it stops speaking).
+      if (!findWake(text, this.opts.wakeWords)) {
+        const words = text.trim().split(/\s+/).filter(Boolean);
+        if (/^\s*(stop|cancel|quiet|enough|shut up)\b/i.test(text)) {
+          stopSpeaking();
+          this.opts.onTranscript(text);   // the app treats "stop" as the emergency stop
+          return;
+        }
+        if (this.opts.bargeIn && words.length >= 3 && !isEchoOfSpeech(text)) {
+          stopSpeaking();                 // conversation mode: just answer
+          this.opts.onTranscript(text);
+          return;
+        }
+        duckSpeech(false);                // TV, someone else, or its own echo
+        return;
+      }
+    }
     if (this.awaitingCommand) {
+      // Just the wake word again ("Jarvis?") isn't a command: keep listening.
+      const again = findWake(text, this.opts.wakeWords);
+      if (again && !again.command) return;
       this.endCommandWindow();
-      if (text) this.opts.onTranscript(text);
+      if (again?.command) this.opts.onTranscript(again.command);
+      else if (text) this.opts.onTranscript(text);
       return;
     }
     const match = findWake(text, this.opts.wakeWords);
@@ -585,10 +653,33 @@ function emitAmplitude(a: number) {
 }
 
 let currentAudio: HTMLAudioElement | null = null;
+let currentGain: GainNode | null = null;
+let ducked = false;
+let spokenRecently = "";   // what Jarvis just said, to tell its echo from the user
 let ampTimer: any = null;
+
+export function isSpeaking(): boolean {
+  return pumping || speechSynthesis.speaking;
+}
+
+/** Turn Jarvis's voice down while the user talks over it (and back up). */
+export function duckSpeech(on: boolean) {
+  ducked = on;
+  if (currentGain) currentGain.gain.setTargetAtTime(on ? 0.25 : 1, currentGain.context.currentTime, 0.05);
+}
+
+/** Was this "speech" just Jarvis's own voice picked up by the mic? */
+export function isEchoOfSpeech(text: string): boolean {
+  const words = (s: string) => s.toLowerCase().match(/[a-z']+/g) ?? [];
+  const heard = words(text);
+  if (!heard.length) return true;
+  const said = new Set(words(spokenRecently));
+  return heard.filter((w) => said.has(w)).length / heard.length >= 0.6;
+}
 
 function cleanText(text: string): string {
   return text
+    .replace(/```listing[\s\S]*?```/g, " ")   // file lists are shown, not read out
     .replace(/```[\s\S]*?```/g, " code block omitted. ")
     .replace(/[*_#`>|]/g, "")
     .slice(0, 2500);
@@ -610,12 +701,42 @@ let queue: QueueItem[] = [];
 let pumping = false;
 let generation = 0;
 
+// Short phrases Jarvis says a lot ("One moment.") are synthesized once and
+// kept, so they play with no delay.
+const phraseCache = new Map<string, Promise<Blob | null>>();
+
 async function fetchWav(text: string): Promise<Blob | null> {
+  const cached = phraseCache.get(text);
+  if (cached) return cached;
   try {
     const { serverTts } = await import("./api");
     return await serverTts(text);
   } catch {
     return null;
+  }
+}
+
+let phraseVoice = "";
+
+/** Synthesize these now and keep them. `voiceKey` identifies the voice: the
+ *  same key again only fills in what's missing (settings reloads, React
+ *  re-runs), a new key starts over. */
+export function prewarmPhrases(phrases: string[], voiceKey = "") {
+  if (voiceKey !== phraseVoice) {
+    phraseCache.clear();
+    phraseVoice = voiceKey;
+  }
+  for (const p of phrases) {
+    const clean = cleanText(p);
+    if (phraseCache.has(clean)) continue;
+    phraseCache.set(clean, (async () => {
+      try {
+        const { serverTts } = await import("./api");
+        return await serverTts(clean);
+      } catch {
+        return null;
+      }
+    })());
   }
 }
 
@@ -640,6 +761,7 @@ async function pump() {
   emitSpeaking(true);
   while (queue.length > 0 && gen === generation) {
     const item = queue.shift()!;
+    spokenRecently = (spokenRecently + " " + item.text).slice(-600);
     const blob = await item.wav;
     if (gen !== generation) break;
     if (blob) await playWavReactive(blob, item.rate, gen);
@@ -685,9 +807,13 @@ function playWavReactive(blob: Blob, rate: number, gen: number): Promise<void> {
 
     const ctx = new AudioContext();
     const source = ctx.createMediaElementSource(audio);
+    const gain = ctx.createGain();            // lets the user talk over it (duckSpeech)
+    gain.gain.value = ducked ? 0.25 : 1;
+    currentGain = gain;
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
-    source.connect(analyser);
+    source.connect(gain);
+    gain.connect(analyser);
     analyser.connect(ctx.destination);
     const data = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
 
@@ -703,6 +829,7 @@ function playWavReactive(blob: Blob, rate: number, gen: number): Promise<void> {
     audio.onplay = () => tick();
     const end = () => {
       cancelAnimationFrame(raf);
+      if (currentGain === gain) currentGain = null;
       URL.revokeObjectURL(url);
       ctx.close().catch(() => {});
       currentAudio = null;
@@ -718,6 +845,7 @@ function playWavReactive(blob: Blob, rate: number, gen: number): Promise<void> {
 export function stopSpeaking() {
   generation++;          // cancels the pump loop and any queued sentences
   queue = [];
+  ducked = false;
   speechSynthesis.cancel();
   if (currentAudio) {
     currentAudio.pause();

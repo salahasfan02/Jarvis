@@ -16,6 +16,8 @@ error says exactly what to install when missing.
 """
 from __future__ import annotations
 
+import os
+
 import asyncio
 import re
 import shutil
@@ -142,7 +144,8 @@ async def run(code: str = "", language: str = "python", timeout: int = 30,
                 workdir_final = target_dir
             else:
                 workdir_final = workdir
-            url = f"http://127.0.0.1:8765/projects/{_slug(project)}/{entry_name}"
+            port = os.environ.get("JARVIS_PORT", "8765")
+            url = f"http://127.0.0.1:{port}/projects/{_slug(project)}/{entry_name}"
             return {"exit_code": 0, "stdout": "", "stderr": "",
                     "preview_url": url, "project": _slug(project),
                     "logs": logs, "seconds": round(time.time() - started, 2)}

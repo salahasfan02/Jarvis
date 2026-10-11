@@ -225,8 +225,26 @@ def test_send_requests_get_send_tools_and_fake_claims_are_challenged(monkeypatch
         return events
 
     events = asyncio.run(main())
-    assert "send_email" in seen[0]["tools"] and "draft_email" not in seen[0]["tools"]
+    # Every request carries the same core tools (cached prompt opening); a
+    # draft-only request turns sends into drafts at execution instead.
+    assert "send_email" in seen[0]["tools"]
     assert seen[1]["last"] == service.CLAIM_NUDGE
     assert any(e["type"] == "confirm_request" and e["tool"] == "send_email" for e in events)
     done = next(e for e in events if e["type"] == "done")
     assert "I've drafted" not in done["content"]   # the false claim isn't kept
+
+
+def test_a_draft_request_never_sends():
+    assert service._respect_intent("draft an email to Sam", "send_email") == "draft_email"
+    assert service._respect_intent("don't send it yet, reply to Kim", "send_reply") == "draft_reply"
+    assert service._respect_intent("send Sam an email", "send_email") == "send_email"
+    assert service._respect_intent("email my landlord that the boiler broke", "draft_email") == "send_email"
+    assert service._respect_intent("write and send a draft to Sam", "send_email") == "send_email"
+
+
+def test_texting_someone_is_an_imessage_not_an_email():
+    name, args = service._texting("text John that I'm running late", "draft_email",
+                                  {"to": "John", "subject": "Late", "body": "Running late!"})
+    assert (name, args) == ("draft_imessage", {"recipient": "John", "body": "Running late!"})
+    assert service._texting("email John the report", "send_email", {"to": "j@x.com"})[0] == "send_email"
+    assert service._texting("text me the link", "draft_email", {"to": "me"})[0] == "draft_email"

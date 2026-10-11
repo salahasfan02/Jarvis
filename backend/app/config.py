@@ -58,7 +58,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "tts_voice": "",                # browser engine only; "" = system default
         "kokoro_voice": "bm_george",    # human-sounding neural voice
         "stt_engine": "whisper",        # whisper (offline) | browser (Chrome only)
-        "whisper_model": "base",        # tiny | base | small
+        "whisper_model": "small.en",    # small.en | tiny | base | small
+        "languages": ["en"],            # ["en", "ar"]: commands may be Arabic too
         "piper_voice_path": "",         # path to a .onnx piper voice model
         "language": "en-US",
     },
@@ -67,6 +68,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     },
     "context": {
         "enabled": True,                # app/tab/music awareness in prompts
+    },
+    "proactive": {
+        "enabled": False,               # offer help when stuck on the same error (uses screen memory)
     },
     "screen_memory": {
         "enabled": False,               # background: watch screen -> save to memory
@@ -89,6 +93,17 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "tools": {
         "enabled": True,
         "max_iterations": 6,            # max tool-call rounds per user message
+    },
+    "control": {
+        # Jarvis never presses, types or clicks in these (automation/guard.py).
+        "blocked_apps": ["1Password", "Bitwarden", "Dashlane", "LastPass", "Keeper", "Passwords",
+                         "Keychain Access", "System Settings", "System Preferences", "Terminal",
+                         "iTerm", "iTerm2", "Warp", "Ghostty", "Wallet"],
+        # ...nor on pages whose address contains any of these.
+        "blocked_sites": ["bank", "paypal", "revolut", "monzo", "starling", "wise.com",
+                          "coinbase", "binance", "kraken", "stripe.com", "accounts.google.com",
+                          "appleid.apple.com", "icloud.com/settings", "1password.com",
+                          "bitwarden.com"],
     },
     "permissions": {
         # tool name -> "ask" | "always" | "never"

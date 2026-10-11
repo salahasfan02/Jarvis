@@ -1,5 +1,10 @@
-export const API = "http://127.0.0.1:8765/api";
-export const WS_URL = "ws://127.0.0.1:8765/api/ws/chat";
+// The backend serves the built UI at /app, so the page talks to whichever
+// backend served it (a test copy can run on another port); the Vite dev
+// server talks to the usual one.
+const SERVED = /^https?:$/.test(location.protocol) && location.pathname.startsWith("/app");
+export const ORIGIN = SERVED ? location.origin : "http://127.0.0.1:8765";
+export const API = `${ORIGIN}/api`;
+export const WS_URL = `${ORIGIN.replace(/^http/, "ws")}/api/ws/chat`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {

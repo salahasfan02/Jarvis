@@ -61,9 +61,25 @@ async def benchmark(model: str) -> dict:
     }
 
 
-def _options() -> dict[str, Any]:
+def _keep_alive(model: str | None) -> str:
+    """How long a model stays loaded after a call. The vision model (6-7 GB) is
+    only needed for camera/screen questions: unloading it after 2 minutes keeps
+    a 24 GB Mac out of memory pressure (Ollama was being killed with the chat,
+    vision and utility models all resident)."""
+    vision = settings.get("ollama.vision_model", "")
+    if model and vision and model == vision and vision != settings.get("ollama.model"):
+        return settings.get("ollama.vision_keep_alive", "2m")
+    return settings.get("ollama.keep_alive", "5m")
+
+
+def _options(tools: bool = False) -> dict[str, Any]:
+    temperature = settings.get("ollama.temperature", 0.7)
+    if tools:
+        # Picking a tool and its arguments should be steady, not creative: at
+        # 0.7 the same request sometimes acted and sometimes asked a question.
+        temperature = min(temperature, settings.get("ollama.tool_temperature", 0.2))
     opts: dict[str, Any] = {
-        "temperature": settings.get("ollama.temperature", 0.7),
+        "temperature": temperature,
         "num_ctx": settings.get("ollama.num_ctx", 8192),
     }
     num_gpu = settings.get("ollama.num_gpu", -1)
@@ -116,8 +132,11 @@ async def chat_stream(messages: list[dict], model: str | None = None,
         "model": model or settings.get("ollama.model"),
         "messages": messages,
         "stream": True,
-        "options": _options(),
-        "keep_alive": settings.get("ollama.keep_alive", "5m"),
+        "options": _options(tools=bool(tools)),
+        "keep_alive": _keep_alive(model),
+        # Thinking models (qwen3.5…) would reason for many seconds before every
+        # reply; an assistant answering commands doesn't need that.
+        "think": bool(settings.get("ollama.think", False)),
     }
     if tools:
         payload["tools"] = tools
@@ -135,6 +154,31 @@ async def chat_stream(messages: list[dict], model: str | None = None,
             f"Cannot reach Ollama at {_host()}. Is `ollama serve` running?") from e
 
 
+async def prefill(messages: list[dict], tools: list[dict] | None = None,
+                  model: str | None = None) -> dict:
+    """Have Ollama read a prompt (and cache it) without really answering:
+    the next request sharing this prefix only processes what's new. Same
+    options as chat_stream — a different num_ctx would reload the model."""
+    payload: dict[str, Any] = {
+        "model": model or settings.get("ollama.model"),
+        "messages": messages,
+        "stream": False,
+        "options": {**_options(tools=bool(tools)), "num_predict": 1},
+        "keep_alive": _keep_alive(model),
+        "think": bool(settings.get("ollama.think", False)),
+    }
+    if tools:
+        payload["tools"] = tools
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(f"{_host()}/api/chat", json=payload)
+            data = r.json()
+            return {"prompt_tokens": data.get("prompt_eval_count", 0),
+                    "seconds": round(data.get("prompt_eval_duration", 0) / 1e9, 2)}
+    except (httpx.HTTPError, ValueError) as e:
+        return {"error": str(e)}
+
+
 async def chat_once(messages: list[dict], model: str | None = None,
                     format: str | dict | None = None) -> str:
     """Non-streamed helper for internal calls (titles, self-analysis...).
@@ -144,7 +188,10 @@ async def chat_once(messages: list[dict], model: str | None = None,
         "messages": messages,
         "stream": False,
         "options": _options(),
-        "keep_alive": settings.get("ollama.keep_alive", "5m"),
+        "keep_alive": _keep_alive(model),
+        # Thinking models (qwen3.5…) would reason for many seconds before every
+        # reply; an assistant answering commands doesn't need that.
+        "think": bool(settings.get("ollama.think", False)),
     }
     if format:
         payload["format"] = format
@@ -193,6 +240,21 @@ async def preload(model: str) -> None:
         r = await client.post(f"{_host()}/api/generate", json={
             "model": model, "keep_alive": settings.get("ollama.keep_alive", "30m")})
         r.raise_for_status()
+
+
+async def embed_many(texts: list[str]) -> list[list[float]] | None:
+    """Embed many texts in one request (not cached — for one-off passages)."""
+    model = settings.get("ollama.embedding_model", "")
+    if not model or not texts:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(f"{_host()}/api/embed", json={"model": model, "input": texts})
+            r.raise_for_status()
+            vectors = r.json().get("embeddings", [])
+            return vectors if len(vectors) == len(texts) else None
+    except httpx.HTTPError:
+        return None
 
 
 async def _embed_uncached(model: str, text: str) -> list[float] | None:

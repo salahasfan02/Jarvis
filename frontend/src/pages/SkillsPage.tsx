@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, Upload } from "lucide-react";
+import { Download, Pencil, Sparkles, Trash2, Upload } from "lucide-react";
 import { Skill, skillsApi } from "../lib/api";
+import { EmptyState, PageHeader, toast } from "../components/ui";
 
 /** Custom skills = saved prompt templates. Invoke in chat with /name.
  *  {input} in the template is replaced with whatever you type after the name. */
@@ -48,7 +49,7 @@ export function SkillsPage() {
     const p = editing
       ? skillsApi.update(editing, body)
       : skillsApi.create(body);
-    p.then(() => { setName(""); setDescription(""); setTemplate(""); setEditing(null); refresh(); });
+    p.then(() => { toast(editing ? "Skill saved" : "Skill added"); setName(""); setDescription(""); setTemplate(""); setEditing(null); refresh(); });
   };
 
   const edit = (s: Skill) => {
@@ -60,68 +61,60 @@ export function SkillsPage() {
          onDragOver={(e) => e.preventDefault()}
          onDrop={(e) => { e.preventDefault(); importFiles(e.dataTransfer.files); }}>
       <div className="page-inner">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <h1>Skills</h1>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn" onClick={() => fileRef.current?.click()}><Upload /> Import</button>
-            <button className="btn" disabled={skills.length === 0} onClick={exportSkills}><Download /> Export</button>
-            <input ref={fileRef} type="file" accept=".json,application/json" multiple
-                   style={{ display: "none" }}
-                   onChange={(e) => { importFiles(e.target.files); e.target.value = ""; }} />
-          </div>
-        </div>
-        <div className="sub" style={{ marginTop: -8 }}>
-          Save prompts you use often. In the Workspace, type <code>/name</code> and
-          your text — Jarvis expands the template (<code>{"{input}"}</code> is replaced
-          with what you type after the name), so you never re-write the same prompt.
-          Import/export or drag a <code>.json</code> skill pack here to share.
-        </div>
-        {importMsg && <div className="sub" style={{ color: "var(--accent)" }}>{importMsg}</div>}
+        <PageHeader title="Skills" actions={<>
+          <button className="btn" onClick={() => fileRef.current?.click()}><Upload /> Import</button>
+          <button className="btn" disabled={skills.length === 0} onClick={exportSkills}><Download /> Export</button>
+          <input ref={fileRef} type="file" accept=".json,application/json" multiple
+                 style={{ display: "none" }}
+                 onChange={(e) => { importFiles(e.target.files); e.target.value = ""; }} />
+        </>}>
+          Prompts you use often. In a chat, type <code>/name</code> and your text — {"{input}"} in the
+          template is replaced with whatever you type after the name.
+        </PageHeader>
+        {importMsg && <div className="sub" style={{ color: "var(--accent-text)" }}>{importMsg}</div>}
 
         <div className="panel">
           <h3>{editing ? "Edit skill" : "New skill"}</h3>
-          <div className="row">
-            <div className="label">Name <span className="sub">(used as /name)</span></div>
-            <input type="text" value={name} placeholder="email"
-                   onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="row">
-            <div className="label">Description</div>
-            <input type="text" value={description} placeholder="Draft a professional email"
-                   onChange={(e) => setDescription(e.target.value)} />
-          </div>
-          <div className="row" style={{ borderBottom: "none" }}>
-            <div style={{ width: "100%" }}>
-              <div className="label" style={{ marginBottom: 4 }}>
-                Template <span className="sub">— use {"{input}"} where your text should go</span>
-              </div>
-              <textarea className="search" style={{ width: "100%", minHeight: 120, resize: "vertical" }}
+          <div className="form-grid" style={{ marginTop: 10 }}>
+            <label className="form-field">Name — you'll type /name
+              <input type="text" className="field" value={name} placeholder="email"
+                     onChange={(e) => setName(e.target.value)} />
+            </label>
+            <label className="form-field">Description
+              <input type="text" className="field" value={description} placeholder="Draft a professional email"
+                     onChange={(e) => setDescription(e.target.value)} />
+            </label>
+            <label className="form-field full">Template — use {"{input}"} where your text goes
+              <textarea className="field" style={{ minHeight: 110, resize: "vertical" }}
                         placeholder={"Write a concise, professional email.\nContext: {input}"}
                         value={template} onChange={(e) => setTemplate(e.target.value)} />
-            </div>
+            </label>
           </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
-            {editing && <button className="btn" onClick={() => {
+          <div className="form-actions" style={{ marginTop: 12 }}>
+            {editing && <button className="btn ghost" onClick={() => {
               setEditing(null); setName(""); setDescription(""); setTemplate("");
             }}>Cancel</button>}
-            <button className="btn primary" onClick={save}>{editing ? "Save changes" : "Add skill"}</button>
+            <button className="btn primary" disabled={!name.trim() || !template.trim()} onClick={save}>
+              {editing ? "Save changes" : "Add skill"}</button>
           </div>
         </div>
 
         <div className="panel">
-          <h3>{skills.length} skills</h3>
-          {skills.length === 0 && <div className="sub">No skills yet — create one above.</div>}
+          <div className="panel-head"><h3>Your skills <span className="badge">{skills.length}</span></h3></div>
+          {skills.length === 0 && (
+            <EmptyState icon={Sparkles} title="No skills yet">Create one above, or drop a .json skill pack here.</EmptyState>
+          )}
           {skills.map((s) => (
-            <div className="row" key={s.id}>
-              <div>
-                <div className="label"><code>/{s.name}</code> — {s.description || "no description"}</div>
-                <div className="sub" style={{ maxWidth: 520, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {s.template.replace(/\n/g, " ")}
-                </div>
+            <div className="list-row" key={s.id}>
+              <div className="tile-icon"><Sparkles /></div>
+              <div className="grow">
+                <div className="title"><code>/{s.name}</code> <span className="muted" style={{ fontWeight: 400 }}>— {s.description || "no description"}</span></div>
+                <div className="meta">{s.template.replace(/\n/g, " ")}</div>
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button className="btn" onClick={() => edit(s)}>Edit</button>
-                <button className="btn danger" onClick={() => skillsApi.remove(s.id).then(refresh)}>Delete</button>
+              <div className="actions">
+                <button className="icon-btn" title="Edit" aria-label="Edit" onClick={() => edit(s)}><Pencil /></button>
+                <button className="icon-btn" title="Delete" aria-label="Delete"
+                        onClick={() => skillsApi.remove(s.id).then(() => { refresh(); toast("Skill deleted"); })}><Trash2 /></button>
               </div>
             </div>
           ))}

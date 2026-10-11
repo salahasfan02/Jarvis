@@ -107,3 +107,16 @@ def test_a_missing_default_model_is_replaced_by_an_installed_one():
     assert warmup.pick_installed("qwen2.5:14b", installed) is None
     assert warmup.pick_installed("llama3.1", ["llama3.1:latest"]) is None
     assert warmup.pick_installed("llama3.1", ["nomic-embed-text"]) is None
+
+
+def test_an_updated_interface_is_never_served_stale(tmp_path):
+    """The page is re-checked every load; its hashed scripts can be kept for good."""
+    from fastapi import FastAPI
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<script src='assets/main-abc.js'></script>")
+    (tmp_path / "assets" / "main-abc.js").write_text("console.log(1)")
+    ui = FastAPI()
+    ui.mount("/app", main.UIFiles(directory=str(tmp_path), html=True))
+    client = TestClient(ui)
+    assert client.get("/app/").headers["cache-control"] == "no-cache"
+    assert "immutable" in client.get("/app/assets/main-abc.js").headers["cache-control"]
