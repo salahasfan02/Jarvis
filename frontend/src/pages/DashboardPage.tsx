@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Activity, AppWindow, ArrowUp, CloudSun, Cpu, Ear, Globe, Mail, MessagesSquare, Mic, Monitor,
+  Activity, AppWindow, ArrowUp, CloudSun, Cpu, Ear, Globe, Lightbulb, Mail, MessagesSquare, Mic, Monitor,
   Music, PanelRight, Square, TriangleAlert, X,
 } from "lucide-react";
-import { statsApi, SystemStats } from "../lib/api";
+import { API, statsApi, SystemStats } from "../lib/api";
+import { LightInfo, LightRow } from "../components/LightsPanel";
 import { voiceBus } from "../lib/voice";
 import { Core, CoreDesign, CoreMode } from "../components/Core";
 import { Answer, ToolChipInfo } from "../components/ChatView";
@@ -81,6 +82,14 @@ export function DashboardPage(props: {
   const [speaking, setSpeaking] = useState(false);
   const [command, setCommand] = useState("");
   const [hudOpen, setHudOpen] = useState(false);
+  const [lights, setLights] = useState<LightInfo[]>([]);
+  const loadLights = () => fetch(`${API}/lights`).then((r) => r.json())
+    .then((r) => setLights(r.configured ? r.lights : [])).catch(() => {});
+  useEffect(() => {
+    loadLights();
+    const t = setInterval(loadLights, 20000);
+    return () => clearInterval(t);
+  }, []);
   const replyRef = useRef<HTMLDivElement>(null);
   const coreSize = useCoreSize();
 
@@ -257,6 +266,13 @@ export function DashboardPage(props: {
             </div>
           ))}
         </div>
+
+        {lights.length > 0 && (
+          <div className="hud-panel">
+            <h4><Lightbulb /> Lights</h4>
+            {lights.map((l) => <LightRow key={l.id} light={l} onChanged={loadLights} compact />)}
+          </div>
+        )}
 
         <div className="hud-panel">
           <h4><AppWindow /> Context</h4>

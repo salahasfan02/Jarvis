@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Bot, Brain, Check, Cpu, Gauge, ImagePlus, KeyRound, Laptop, Mic, Palette, ShieldBan, Smartphone,
+  Bot, Brain, Check, Cpu, Gauge, ImagePlus, KeyRound, Laptop, Lightbulb, Mic, Palette, ShieldBan, Smartphone,
   UserRound, X,
 } from "lucide-react";
 import { PageHeader } from "../components/ui";
+import { LightsPanel } from "../components/LightsPanel";
 
 const SECTIONS = [
   { id: "s-model", label: "AI models", icon: Cpu },
   { id: "s-assistant", label: "Assistant", icon: Bot },
   { id: "s-voice", label: "Voice", icon: Mic },
   { id: "s-phone", label: "Phone", icon: Smartphone },
+  { id: "s-lights", label: "Smart lights", icon: Lightbulb },
   { id: "s-memory", label: "Memory", icon: Brain },
   { id: "s-you", label: "About you", icon: UserRound },
   { id: "s-offlimits", label: "Off-limits", icon: ShieldBan },
@@ -719,6 +721,7 @@ export function SettingsPage(props: {
         </div>
 
         <PhonePanel onPatch={props.onPatch} />
+        <LightsPanel />
 
         <div className="panel" id="s-memory">
           <h3>Memory</h3>

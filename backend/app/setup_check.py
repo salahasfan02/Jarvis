@@ -331,6 +331,17 @@ def _voice() -> list[dict]:
     return out
 
 
+def _lights() -> dict:
+    from . import lights
+    why = "“lights off”, “make the bedroom light blue”"
+    found = lights.saved()
+    if found:
+        names = ", ".join(x["name"] for x in found)
+        return _item("lights", "Smart lights", why, "ok", f"Connected: {names}.")
+    return _item("lights", "Smart lights", why, "optional",
+                 "Not set up — connect your Tapo account.", "settings_page", "Set up")
+
+
 def _phone() -> dict:
     try:
         from .channels import telegram
@@ -358,7 +369,7 @@ async def run_all() -> dict:
     system = await asyncio.to_thread(lambda: [_accessibility(fresh[0]), _screen(fresh[1]),
                                               _calendar(), _reminders(), _full_disk(),
                                               *_automation()])
-    checks += system + await asyncio.to_thread(_voice) + [_phone()]
+    checks += system + await asyncio.to_thread(_voice) + [_phone(), _lights()]
     problems = sum(c["status"] in ("missing", "ask", "restart") for c in checks)
     owner = await asyncio.to_thread(responsible_app)
     return {"checks": checks, "problems": problems, "checked_at": time.time(), "grant_to": owner}

@@ -184,6 +184,12 @@ def fake_output(name: str, args: dict) -> str:
         return "No matching notes."
     if name == "send_file":
         return f"Sent {args.get('path')} to the user's phone."
+    if name == "lights":
+        if args.get("power") == "off":
+            return "Bedroom: off."
+        return "Bedroom: on, 80%, " + (str(args.get("color")) if args.get("color") else "white 2700K") + "."
+    if name == "music_play":
+        return f"Playing {args.get('query') or 'music'} from Apple Music."
     if name == "send_to_phone":
         return ("Sent to your phone on Telegram." if not args.get("as_document")
                 else "Sent the Word document to your phone on Telegram.")

@@ -904,6 +904,7 @@ async def run_chat(conversation_id: str, user_content: str,
                 args = fn.get("arguments") or {}
                 if isinstance(args, dict):
                     name, args = _texting(user_content, name, args)
+                    name, args = _music_service(user_content, name, args)
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
@@ -1248,6 +1249,17 @@ async def _plan_summary(goal: str, steps: list[str], results: list[str]) -> str:
 
 
 _ASKED_TO_SEND = re.compile(r"\b(?:send|text)\b", re.I)
+
+
+def _music_service(user_content: str, name: str, args: dict) -> tuple[str, dict]:
+    """Music goes to Apple Music (they subscribe) unless they asked for YouTube
+    or a video — 'put on some relaxing jazz' was opening YouTube."""
+    if (name == "youtube_play" and settings.get("music.service", "apple_music") == "apple_music"
+            and not re.search(r"\b(?:youtube|video|watch|clip|trailer)\b", user_content, re.I)):
+        return "music_play", {"query": args.get("query", "")}
+    return name, args
+
+
 _DOC_TOOLS = ("create_word_document", "create_presentation")
 _MADE_PATH = re.compile(r" at (/\S.*?\.(?:docx|xlsx|pptx|pdf|md|txt|csv))\b")
 

@@ -173,6 +173,16 @@ def match(text: str) -> QuickAction | None:
     if action := _calendar(low):
         return action
 
+    # "play janice stfu by drake" — Apple Music (they subscribe), unless it's a
+    # control ("play", "play next") or meant for YouTube.
+    if (m := re.fullmatch(r"play\s+(?:me\s+)?(?:some\s+)?(.+)", low)) and not _MEDIA_RE.fullmatch(low) \
+            and not re.search(r"\b(?:youtube|video)\b", low) \
+            and settings.get("music.service", "apple_music") == "apple_music":
+        query = m.group(1).strip()
+        if query not in ("music", "something", "a song", "songs") and not re.fullmatch(
+                r"(?:the\s+)?(?:next|previous|last)(?:\s+(?:song|track|one|video))?|it|that|this", query):
+            return QuickAction("music_play", {"query": query}, "")
+
     if m := _MEDIA_RE.fullmatch(low):
         word, target = m.group(1), m.group(2) or ""
         if word in _NEEDS_TARGET and not target:
@@ -270,6 +280,41 @@ def _instant(t: str, low: str) -> QuickAction | None:
     # "send that to me" / "send me the whole chat" / "put that in a document and send it to me"
     if action := _send_to_me(low):
         return action
+    if action := _lights(low):
+        return action
+    return None
+
+
+_L = r"(?:the |my |all (?:the )?)?(?P<name>[a-z][a-z ]{0,20}? )?(?:lights?|lamps?|bulbs?)"
+
+
+def _lights(low: str) -> QuickAction | None:
+    """'lights off', 'turn on the bedroom light', 'dim the lights', 'lights to 30%',
+    'make the lights blue' — the lights tool, straight away."""
+    from .. import lights
+    if not lights.configured():
+        return None
+
+    def act(**args) -> QuickAction:
+        name = (args.pop("name", "") or "").strip()
+        return QuickAction("lights", {**args, "light": name}, "")
+
+    if m := (re.fullmatch(rf"(?:turn|switch|put) {_L} (?P<p>on|off)", low)
+             or re.fullmatch(rf"(?:turn|switch) (?P<p>on|off) {_L}", low)
+             or re.fullmatch(rf"{_L} (?P<p>on|off)", low)):
+        return act(power=m.group("p"), name=m.group("name"))
+    if m := re.fullmatch(rf"(?:set |turn |put |dim |change )?{_L} (?:to |at |on )?(?P<n>\d{{1,3}})\s*(?:%|percent)?", low):
+        return act(brightness=int(m.group("n")), name=m.group("name"))
+    if m := re.fullmatch(rf"dim {_L}(?: a bit| a little)?", low):
+        return act(change=-30, name=m.group("name"))
+    if m := (re.fullmatch(rf"(?:brighten|turn up) {_L}(?: a bit| a little)?", low)
+             or re.fullmatch(rf"{_L} (?:brighter|up)", low)):
+        return act(change=30, name=m.group("name"))
+    if m := (re.fullmatch(rf"{_L} (?:dimmer|down)", low) or re.fullmatch(rf"turn down {_L}", low)):
+        return act(change=-30, name=m.group("name"))
+    if m := re.fullmatch(rf"(?:make|turn|set|change|put) {_L} (?:to |on )?(?P<c>[a-z ]+?|#[0-9a-f]{{6}}|\d{{4}}k?)", low):
+        if lights.parse_color(m.group("c")):
+            return act(color=m.group("c"), name=m.group("name"))
     return None
 
 

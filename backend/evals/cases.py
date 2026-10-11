@@ -193,6 +193,16 @@ CASES = [
     {"say": "write a short report about electric cars as a word document and send it to me",
      "tools": [["research_report", "create_word_document"], "send_file"]},
 
+    # --- lights & music ------------------------------------------------------------------------
+    {"say": "turn the lights off", "tools": ["lights"], "args": {"lights": {"power": "off"}}},
+    {"say": "can you make the bedroom light blue", "tools": ["lights"],
+     "args": {"lights": {"color": "blue", "light": "bedroom"}}},
+    {"say": "it's too bright in here, dim the lamp a bit", "tools": ["lights"]},
+    {"say": "turn off the lights at 11pm every night", "tools": ["create_routine"], "forbid": ["lights"]},
+    {"say": "play janice stfu by drake", "tools": ["music_play"],
+     "args": {"music_play": {"query": "janice"}}},
+    {"say": "put on some relaxing jazz", "tools": ["music_play"], "forbid": ["youtube_play"]},
+
     # --- the internet ---------------------------------------------------------------------------
     {"say": "what's the weather today", "tools": ["weather"], "reply": r"16|°"},
     {"say": "do I need an umbrella tomorrow", "tools": ["weather"]},

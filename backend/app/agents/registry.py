@@ -80,9 +80,11 @@ register(Agent(
     id="media", name="Media Agent",
     description="Playing or controlling music and videos: YouTube, Apple Music, playlists, "
                 "pause/skip/shuffle.",
-    prompt="You are in media mode. Continue the user's current music or video session "
-           "in place — reuse the open YouTube tab or the running Music app, never open "
-           "duplicates. Confirm what is now playing.",
+    prompt="You are in media mode. Music means Apple Music (the user subscribes): play "
+           "songs, artists and moods with music_play. Use YouTube only when they say "
+           "YouTube or want a video. Continue the current session in place — reuse the "
+           "open YouTube tab or the running Music app, never open duplicates. Confirm what "
+           "is now playing.",
     tool_tags=["music", "browser"]))
 
 register(Agent(

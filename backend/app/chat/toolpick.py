@@ -56,6 +56,8 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     "send that": ("send_file", "send_to_phone"), "send them": ("send_file", "send_to_phone"),
     "send this": ("send_file", "send_to_phone"), "telegram": ("send_to_phone",),
     "my phone": ("send_to_phone", "send_file"), "whole chat": ("send_to_phone",),
+    "light": ("lights",), "lamp": ("lights",), "bulb": ("lights",), "brightness": ("lights",),
+    "dim": ("lights",),
     "weather": ("weather",), "forecast": ("weather",), "rain": ("weather",),
     "umbrella": ("weather",), "temperature": ("weather",), "degrees": ("weather",),
     "sunny": ("weather",), "snow": ("weather",), "windy": ("weather",),

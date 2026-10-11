@@ -515,6 +515,54 @@ def backgrounds_delete(name: str):
     return backgrounds.delete(name)
 
 
+# --- smart lights -------------------------------------------------------------------------
+
+@router.get("/lights")
+async def lights_list():
+    from .. import lights
+    if not lights.configured():
+        return {"configured": False, "lights": []}
+    return {"configured": True, "lights": await lights.status()}
+
+
+@router.post("/lights/connect")
+async def lights_connect(body: dict):
+    """The Tapo email + password, typed by the user: used to connect, never stored."""
+    from .. import lights
+    email, password = str(body.get("email", "")).strip(), str(body.get("password", ""))
+    if not email or not password:
+        return {"error": "Enter the email and password of your Tapo account."}
+    try:
+        found = await lights.connect_account(email, password)
+    except lights.LightsError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"Couldn't connect: {e}"}
+    audit.log("lights_connected", count=len(found))
+    return {"ok": True, "lights": found}
+
+
+@router.post("/lights/control")
+async def lights_control(body: dict):
+    from .. import lights
+    try:
+        text = await lights.control(str(body.get("light", "")), power=str(body.get("power", "")),
+                                    brightness=body.get("brightness") or None,
+                                    change=body.get("change") or None,
+                                    color=str(body.get("color", "")))
+    except lights.LightsError as e:
+        return {"error": str(e)}
+    return {"result": text}
+
+
+@router.delete("/lights")
+async def lights_forget():
+    from .. import lights
+    lights.forget()
+    audit.log("lights_forgotten")
+    return {"ok": True}
+
+
 # --- phone channel (Telegram) ---------------------------------------------------
 
 @router.get("/telegram/status")

@@ -1091,3 +1091,24 @@ input[type="range"] { accent-color: var(--accent); }
   .composer-wrap { padding: 8px 16px 14px; }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+/* smart lights (Settings, Core) */
+.light-row { padding: 12px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.light-row:last-child { border-bottom: none; }
+.hud-panel .light-row { padding: 6px 0; gap: 6px; }
+.light-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.light-head .grow { flex: 1; min-width: 0; }
+.light-head .title { font-weight: 550; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.light-head .meta { font-size: 12.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-panel .light-head .tile-icon { width: 28px; height: 28px; border-radius: 8px; }
+.hud-panel .light-head .title { font-size: 13px; }
+.hud-panel .light-head .meta { font-size: 11.5px; }
+.tile-icon.off { background: var(--surface-3); color: var(--text-3); }
+.light-level { width: 100%; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch {
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line-2); padding: 0;
+  box-shadow: inset 0 0 0 2px rgba(0,0,0,0.15); transition: transform var(--fast), border-color var(--fast);
+}
+.swatch:hover { transform: scale(1.12); border-color: var(--text-2); }
+.lights-connect { margin-top: 6px; }
