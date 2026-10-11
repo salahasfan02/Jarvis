@@ -240,3 +240,11 @@ def test_a_draft_request_never_sends():
     assert service._respect_intent("send Sam an email", "send_email") == "send_email"
     assert service._respect_intent("email my landlord that the boiler broke", "draft_email") == "send_email"
     assert service._respect_intent("write and send a draft to Sam", "send_email") == "send_email"
+
+
+def test_texting_someone_is_an_imessage_not_an_email():
+    name, args = service._texting("text John that I'm running late", "draft_email",
+                                  {"to": "John", "subject": "Late", "body": "Running late!"})
+    assert (name, args) == ("draft_imessage", {"recipient": "John", "body": "Running late!"})
+    assert service._texting("email John the report", "send_email", {"to": "j@x.com"})[0] == "send_email"
+    assert service._texting("text me the link", "draft_email", {"to": "me"})[0] == "draft_email"

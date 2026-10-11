@@ -61,6 +61,17 @@ async def benchmark(model: str) -> dict:
     }
 
 
+def _keep_alive(model: str | None) -> str:
+    """How long a model stays loaded after a call. The vision model (6-7 GB) is
+    only needed for camera/screen questions: unloading it after 2 minutes keeps
+    a 24 GB Mac out of memory pressure (Ollama was being killed with the chat,
+    vision and utility models all resident)."""
+    vision = settings.get("ollama.vision_model", "")
+    if model and vision and model == vision and vision != settings.get("ollama.model"):
+        return settings.get("ollama.vision_keep_alive", "2m")
+    return settings.get("ollama.keep_alive", "5m")
+
+
 def _options(tools: bool = False) -> dict[str, Any]:
     temperature = settings.get("ollama.temperature", 0.7)
     if tools:
@@ -122,7 +133,7 @@ async def chat_stream(messages: list[dict], model: str | None = None,
         "messages": messages,
         "stream": True,
         "options": _options(tools=bool(tools)),
-        "keep_alive": settings.get("ollama.keep_alive", "5m"),
+        "keep_alive": _keep_alive(model),
         # Thinking models (qwen3.5…) would reason for many seconds before every
         # reply; an assistant answering commands doesn't need that.
         "think": bool(settings.get("ollama.think", False)),
@@ -153,7 +164,7 @@ async def prefill(messages: list[dict], tools: list[dict] | None = None,
         "messages": messages,
         "stream": False,
         "options": {**_options(tools=bool(tools)), "num_predict": 1},
-        "keep_alive": settings.get("ollama.keep_alive", "5m"),
+        "keep_alive": _keep_alive(model),
         "think": bool(settings.get("ollama.think", False)),
     }
     if tools:
@@ -177,7 +188,7 @@ async def chat_once(messages: list[dict], model: str | None = None,
         "messages": messages,
         "stream": False,
         "options": _options(),
-        "keep_alive": settings.get("ollama.keep_alive", "5m"),
+        "keep_alive": _keep_alive(model),
         # Thinking models (qwen3.5…) would reason for many seconds before every
         # reply; an assistant answering commands doesn't need that.
         "think": bool(settings.get("ollama.think", False)),

@@ -233,6 +233,17 @@ _SAYS_SEND = re.compile(
     r"|\breply\b[^.?!]*\band send\b", re.I)
 
 
+_SAYS_TEXT = re.compile(r"^\s*(?:please\s+)?(?:text|imessage|message|whatsapp)\s+(?!me\b)\w", re.I)
+
+
+def _texting(user_content: str, name: str, args: dict) -> tuple[str, dict]:
+    """"Text John that…" is an iMessage, not an email: the model sometimes
+    reached for draft_email. Rewritten here (same reason as _respect_intent)."""
+    if name in ("draft_email", "send_email") and _SAYS_TEXT.search(user_content):
+        return "draft_imessage", {"recipient": args.get("to", ""), "body": args.get("body", "")}
+    return name, args
+
+
 def _respect_intent(user_content: str, name: str) -> str:
     """Draft-only requests never send; send requests never stop at a draft.
     Done here, not by hiding tools, so the cached prompt opening never changes."""
@@ -608,6 +619,8 @@ async def run_chat(conversation_id: str, user_content: str,
                 fn = tc.get("function", {})
                 name = _respect_intent(user_content, fn.get("name", ""))
                 args = fn.get("arguments") or {}
+                if isinstance(args, dict):
+                    name, args = _texting(user_content, name, args)
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
