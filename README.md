@@ -34,7 +34,9 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **🔒 Totally private** — runs on local models via Ollama. No accounts, no API keys, no telemetry. Your conversations, screen, camera, files, and memories never leave your machine.
 - **🎙️ Voice-first** — say *"Jarvis…"* and it wakes up (with a chime), listens with **offline Whisper**, and replies in a **human neural voice**. Have a real back-and-forth conversation, hands-free.
 - **👁️ It can actually see** — reads your screen with Apple's OCR, watches through your camera, and answers questions about whatever's in front of you.
-- **🦾 It does things** — opens apps, controls your browser, plays music, drafts emails, manages files, runs code — with a permission prompt before anything touches your system.
+- **🌐 It knows what's going on** — researches the web, reads the best pages and answers with **numbered sources**; live weather without an API key.
+- **🦾 It does things** — opens apps, controls your browser, plays anything on **Apple Music**, switches your **smart lights**, drafts emails, manages files, runs code — with a permission prompt before anything touches your system.
+- **📱 It's in your pocket** — message it on Telegram, and *"send that to me"* puts any answer, chat or document on your phone.
 - **🧩 It's an OS, not a chatbot** — a living command-center dashboard with agents, projects, long-term memory, and a plugin system it can extend *itself*.
 - **🆓 Free & source-available** — free for any **noncommercial** use. Fork it, hack it, make it yours.
 
@@ -44,21 +46,32 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 
 <div align="center">
 
-**The Core** — a reactive command center, not a chat box
+**The Core** — ask anything by voice or text; answers come with their sources, and your Mac's vitals sit alongside
 ![Core](docs/screenshots/core.png)
 
-**Unified Workspace** — chat and code in one place, with runnable code blocks and live tool calls
-![Workspace](docs/screenshots/workspace.png)
+**Research with sources** — Jarvis searches the web, reads the best pages and cites every claim
+![Chat](docs/screenshots/chat.png)
 
 </div>
 
-| Custom Skills | Long-term Memory |
+| Routines — things it does on its own | Setup check — every permission, one click to fix |
 |:---:|:---:|
-| ![Skills](docs/screenshots/skills.png) | ![Memory](docs/screenshots/memory.png) |
+| ![Routines](docs/screenshots/routines.png) | ![Setup check](docs/screenshots/setup.png) |
 
-| Model & Voice Settings | Self-Improvement Registry |
+| Long-term Memory | Custom Skills |
 |:---:|:---:|
-| ![Settings](docs/screenshots/settings.png) | ![Capabilities](docs/screenshots/capabilities.png) |
+| ![Memory](docs/screenshots/memory.png) | ![Skills](docs/screenshots/skills.png) |
+
+| Smart lights in Settings | ⌘K — jump anywhere, or just ask |
+|:---:|:---:|
+| ![Settings](docs/screenshots/settings.png) | ![Command palette](docs/screenshots/palette.png) |
+
+<div align="center">
+
+**Self-improvement** — what it couldn't do yet, logged and ranked so it can build it
+<img src="docs/screenshots/capabilities.png" width="49%" alt="Capabilities">
+
+</div>
 
 ---
 
@@ -90,8 +103,9 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Activity & undo** — every action logged; *"undo that"* moves files back, restores overwritten or trashed ones, removes what it created
 - Open apps and **files by name** (*"open my CV"*), control windows, notifications, clipboard
 - **Browser agent** — clicks links and buttons on any page, closes tabs by name, reuses your tabs
-- Play **YouTube** & **Apple Music**, manage playlists
-- **Calendar** — *"what's on my calendar tomorrow?"* (all calendars, repeating events included) · **Notes, Reminders** — read and create
+- **Apple Music** — *"play Espresso by Sabrina Carpenter"* plays any song in the Apple Music catalogue, not just your library (needs a subscription), without adding it to your library · *"put on some relaxing jazz"* · **YouTube** when you ask for it
+- **Smart lights** — Tapo & Kasa bulbs on your Wi-Fi: *"lights off"*, *"dim the lights"*, *"make the bedroom light blue"*, *"warm white at 40%"*, or a routine like *"turn the lights off at 11pm every night"* · works alongside Alexa
+- **Calendar** — *"what's on my calendar tomorrow?"* (all calendars, repeating events included) · **Notes, Reminders** — read and create; *"remind me at 6 to call Sam"* keeps the time (in Arabic too)
 - **Email** — *"summarize my emails"*, *"any new mail from Sam?"*, reply, draft, or send with attachments by name (*"email my CV to…"*); you approve every email first · draft iMessages
 - **Knows your people** — *"email my landlord"* finds them in Jarvis's memory or your Contacts
 
@@ -112,7 +126,9 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Projects** — per-project memory across conversations
 
 ### 🕵️ Research
-- Live web search + page reading with **mandatory citations**
+- **Researches the web for you** — searches (DuckDuckGo, then Bing), reads the top pages, keeps the passages that answer the question and replies with **numbered citations** and a **Sources** list
+- **Live weather** — *"do I need an umbrella tomorrow?"* (Open-Meteo, no API key)
+- **Research reports** — *"research the best budget e-bikes and write me a Word doc"* → a `.docx` with its sources
 - Scoped search: GitHub, Stack Overflow, Reddit, arXiv, YouTube
 
 ### 🤖 Intelligence
@@ -122,7 +138,8 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Self-improving** — logs what it can't do and can write its own tools
 - **Multi-model** — assign models per task, benchmark them
 - **Fast by design** — only the tools a request needs go into the prompt, so even a 14B model answers quickly
-- **Built-in eval suite** — 60+ real requests replayed against fake tools to check every model change, and it **learns from real mistakes**: slips and *"that's wrong"* become new test cases
+- **Honest by design** — it never says it sent, saved or booked something unless a tool actually did it, it respects a *"no"*, and it doesn't repeat itself
+- **Built-in eval suite** — 90 real requests replayed against fake tools to check every model change, and it **learns from real mistakes**: slips and *"that's wrong"* become new test cases
 - **Long conversations** — older turns are summarized in the background so nothing falls out of the model's memory
 - **Instant commands** — *"open YouTube"*, *"open Safari"*, *"pause"* run in well under a second, no model needed
 
@@ -131,7 +148,7 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 </table>
 
 ### 🖥️ Menu-bar Quick Command
-Hit **⌥Space** from *any* app to summon a floating command bar — ask about what's on your screen, get an answer, and get back to work without switching windows.
+Hit **⌥Space** from *any* app to summon a floating command bar — ask about what's on your screen, get an answer, and get back to work without switching windows. Inside Jarvis, **⌘K** jumps to any page, chat or action — or just asks.
 
 ### ☀️ Daily Briefing
 *"Jarvis, give me my daily briefing"* → live weather, today's calendar, and your reminders, narrated.
@@ -141,6 +158,8 @@ Message Jarvis on **Telegram** from anywhere. It does the work on your Mac and r
 - *"Send me the lease PDF from my Downloads"* → finds the file and sends it to you
 - *"Research the best budget e-bikes and send me a Word doc"* → searches, writes a `.docx` with sources, sends it
 - 🎙 **Voice notes** in, voice notes back · send it files or photos to ask about · approve risky actions with one tap
+- **"Send that to me"** at the Mac → the answer you just got arrives on your phone · *"send me the whole chat"* · *"put that in a document and send it to me"* → a Word file in Telegram
+- A message cut off by a restart is offered back, so nothing you asked for gets lost
 
 Two-minute setup — see [Phone setup](#-phone-setup-telegram).
 
@@ -209,7 +228,8 @@ cd frontend && npm install && npm run dev   # → http://localhost:5173
 
 ```bash
 ollama pull nomic-embed-text   # semantic memory + smarter agent routing
-ollama pull llava              # camera & screen vision
+ollama pull llama3.2:3b        # a small, fast helper for titles and background work
+ollama pull qwen3.5            # camera & screen vision
 ```
 
 Then open **Settings** to enable them, download the offline **Whisper** and human **Kokoro** voice models, pick your theme, and set your wake word.
@@ -217,8 +237,12 @@ Then open **Settings** to enable them, download the offline **Whisper** and huma
 ### 🖥️ Install as a Mac app
 `cd desktop && npm run install-app` builds **Jarvis.app** (with its own icon), signs it locally and
 installs it in Applications. It starts Ollama if needed, only ever runs once, and can open at login
-(Settings → Desktop app). It's a new app to macOS, so allow the microphone, camera, Accessibility and
-Screen Recording once — **Setup check** lists anything still missing, with a fix button for each.
+(Settings → Desktop app). It's a new app to macOS, so allow the microphone, camera, Accessibility,
+Screen Recording, Calendars and Reminders once — **Setup check** lists anything still missing, with a
+fix button for each (and a restart button when macOS needs one).
+
+The installer signs with a certificate it makes once on your Mac (*Jarvis Local Signing*), so the
+permissions you grant **survive every rebuild** — no re-allowing after an update.
 
 ### 📱 Phone setup (Telegram)
 
@@ -232,6 +256,19 @@ Things to know:
 - **Privacy trade-off:** Telegram bot chats aren't end-to-end encrypted, so what you send and receive passes through Telegram's servers. The feature is off until you set it up.
 - Telegram bots can't take phone calls — voice notes are the hands-free way in (needs the Whisper model; voice replies need Kokoro). Files: up to 50 MB to your phone, 20 MB from it.
 - Word documents are saved in `~/Documents/Jarvis`; files you send Jarvis land in `~/Downloads/Jarvis`. `/new` starts a fresh conversation, `/stop` cancels.
+- Once paired, *"send that to me"* at the Mac goes to this chat too.
+
+### 💡 Smart lights setup (Tapo / Kasa)
+
+1. Make sure your Mac is on the same Wi-Fi as the lights.
+2. In Jarvis, open **Settings → Smart lights**, type your **Tapo account** email and password, and press **Connect**. Jarvis finds every light on the network and lists it with a switch, brightness and colours.
+3. Say *"lights off"* — or put the lights in a routine.
+
+Things to know:
+- **Your password isn't saved.** It's used once to connect; Jarvis keeps only a key for each light (`~/.jarvis/lights.json`, readable only by you), which can't sign in to your Tapo account.
+- Jarvis talks to the lights **directly on your Wi-Fi**, so Alexa and the Tapo app keep working. Cameras and other Tapo devices are left alone.
+- If a light moves to a new address on your network, Jarvis finds it again by itself.
+- Newer Tapo firmware only lets other apps in when **Third-Party Compatibility** is on in the Tapo app (**Me → Tapo Lab**, or **Me → Third-Party Services**). If Jarvis says your light *didn't accept* a correct password, turn that on.
 
 ---
 
@@ -286,7 +323,21 @@ Simple commands (*"open YouTube"*, *"pause"*) skip the model entirely. For every
 <details>
 <summary><b>Screen reading, camera, or app automation does nothing</b></summary>
 
-Missing macOS permissions. Open System Settings → Privacy & Security and grant **Screen Recording**, **Camera**, **Microphone**, and **Accessibility** to your terminal (or to Jarvis.app if you packaged it), then restart Jarvis.
+Missing macOS permissions. Open System Settings → Privacy & Security and grant **Screen Recording**, **Camera**, **Microphone**, and **Accessibility** to your terminal (or to Jarvis.app if you packaged it), then restart Jarvis. **Setup check** shows which ones are missing and opens the right page.
+</details>
+
+<details>
+<summary><b>Smart lights: "No Tapo or Kasa lights answered" / "macOS is keeping Jarvis off your Wi-Fi"</b></summary>
+
+- Check the light works in the Tapo app and your Mac is on the same Wi-Fi (not a guest network).
+- macOS's **Local Network** privacy has to allow it. Jarvis talks to the lights through a small helper that macOS lists as **Python**: turn **Python** on in System Settings → Privacy & Security → Local Network (or press *Allow* when macOS asks). This works around a macOS bug that blocks some apps without ever asking or listing them.
+- *"Your light didn't accept that Tapo email and password"* with the right details means **Third-Party Compatibility** is off in the Tapo app (Me → Tapo Lab, or Me → Third-Party Services).
+</details>
+
+<details>
+<summary><b>"Play …" doesn't start the song</b></summary>
+
+Playing from the Apple Music catalogue needs an **Apple Music subscription**, the **Music** app signed in, and **Accessibility** for Jarvis (it queues the song with *Play Next*). Songs already in your library play without either.
 </details>
 
 ---
@@ -300,7 +351,8 @@ Missing macOS permissions. Open System Settings → Privacy & Security and grant
 | **Python** | **3.11+** — macOS's built-in `python3` is 3.9 and will not install the backend. `brew install python@3.12` |
 | **Node.js** | 18+ |
 | **RAM** | 16 GB minimum, 24 GB+ recommended for larger models |
-| **Permissions** | Screen Recording, Camera, Microphone, Accessibility (prompted on first use) |
+| **Permissions** | Screen Recording, Camera, Microphone, Accessibility, Calendars, Reminders (prompted on first use) · Local Network for smart lights |
+| **Optional** | Apple Music subscription (play any song) · Tapo / Kasa smart lights · Telegram (phone access) |
 
 > 💡 **Model tip:** `qwen2.5:14b` is the sweet spot for tool-calling on a 16–24 GB Mac. The app is fully model-agnostic — switch models anytime in Settings, and even benchmark them on your hardware.
 
@@ -310,7 +362,8 @@ Missing macOS permissions. Open System Settings → Privacy & Security and grant
 
 Jarvis is built to earn your trust:
 
-- **Runs 100% locally** — the only network calls are the web-search tools *you* invoke, plus Telegram if you turn on the phone channel.
+- **Runs 100% locally** — the AI never leaves your Mac. The only things that go online are what you ask for: web research and weather (DuckDuckGo/Bing, the pages they find, Open-Meteo), song lookups for Apple Music (Apple's search API), and Telegram if you turn on the phone channel. Smart lights are controlled on your own Wi-Fi, not through the cloud.
+- **No passwords kept** — your Tapo password is used once and forgotten; Jarvis keeps only a per-light key. The Telegram token is stored readable only by you.
 - **Permission system** — every action has a risk level. Safe actions run instantly; anything that touches your system (shell, AppleScript, deleting files) asks first, every time.
 - **Audit log** — every tool call, confirmation, and denial is recorded.
 - **Nothing is sent behind your back** — iMessages are only drafted; an email goes out only when you say *send* and approve that exact message (this approval can't be switched off).
@@ -321,9 +374,9 @@ Jarvis is built to earn your trust:
 
 ## 🏗️ Tech Stack
 
-**Backend:** FastAPI · Ollama · SQLite · faster-whisper (STT) · Kokoro (TTS) · Apple Vision (OCR) · pyobjc
-**Frontend:** React · TypeScript · Vite · [Lucide](https://lucide.dev) icons (ISC)
-**Desktop:** Electron (tray, global hotkeys, floating window)
+**Backend:** FastAPI · Ollama · SQLite · faster-whisper (STT) · Kokoro (TTS) · Apple Vision (OCR) · pyobjc · trafilatura (reading web pages) · python-kasa (Tapo / Kasa lights) · Open-Meteo (weather)
+**Frontend:** React · TypeScript · Vite · Vitest · [Lucide](https://lucide.dev) icons (ISC)
+**Desktop:** Electron (tray, global hotkeys, floating window), signed locally so permissions persist
 
 Modular by design — new tools, agents, models, and integrations drop in without touching the core. See [`docs/architecture.md`](docs/architecture.md).
 
@@ -344,9 +397,14 @@ Modular by design — new tools, agents, models, and integrations drop in withou
 
 PRs, ideas, and bug reports are welcome. Jarvis is designed to be extended — writing a new tool or plugin is a few lines of Python (see [`docs/architecture.md`](docs/architecture.md)).
 
-Run the backend tests (any OS, no Ollama needed): `cd backend && .venv/bin/pip install pytest && .venv/bin/python -m pytest`
+Run the tests (no Ollama needed):
 
-Check how well a model handles real requests (needs Ollama; tools are faked, nothing on your Mac is touched): `cd backend && .venv/bin/python -m evals.run --model qwen2.5:14b` — prints pass/fail and timing for 50+ requests like *"email my CV to…"* and *"close the github tab"*.
+```bash
+cd backend && .venv/bin/pip install pytest && .venv/bin/python -m pytest   # 210+ backend tests, any OS
+cd frontend && npm test                                                    # interface helpers (Vitest)
+```
+
+Check how well a model handles real requests (needs Ollama; tools are faked, nothing on your Mac is touched): `cd backend && .venv/bin/python -m evals.run --model qwen2.5:14b` — prints pass/fail and timing for 90 requests like *"email my CV to…"*, *"send the weather you just gave me to my phone"* and *"make the bedroom light blue"*.
 
 ## ⭐ Star it
 

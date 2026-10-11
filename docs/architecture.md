@@ -133,8 +133,13 @@ Telegram ─ getUpdates ─> TelegramBot.handle()      (poll loop: fast routing 
 ```
 
 - `channels.current` (a ContextVar) is set for the turn. `send_file` uses it
-  to deliver to the chat the request came from; at the desk it just reveals
-  the file in Finder.
+  to deliver to the chat the request came from; at the desk it goes to the
+  paired phone (`telegram.owner()`), or reveals the file in Finder when no
+  phone is paired.
+- `send_to_phone` is "send that to me": the previous answer, the whole
+  conversation (`channels.conversation` names it), or either as a Word file.
+  Content comes from the database, so a long answer isn't retyped by the
+  model; an answer that made a document sends the document.
 - Remote turns add `REMOTE_TOOL_TAGS` (`remote`, `files`, `research`) to the
   routed agent's tools, so "find X and send it" and "research Y into a Word
   doc" work whichever agent the router picks.
@@ -146,6 +151,64 @@ Telegram ─ getUpdates ─> TelegramBot.handle()      (poll loop: fast routing 
 
 A new channel (e.g. Twilio voice calls) subclasses `channels.ChannelSession`
 (`name`, `allow_dangerous`, `send_file`) and drives `run_chat()` the same way.
+
+## Web research (v4)
+
+`tools/builtin/research.py` does the reading a 14B model with an 8k context
+can't: search (DuckDuckGo, then Bing), fetch the top pages in parallel,
+pull out each page's main text (trafilatura), split it into passages and
+keep the few closest in meaning to the question (the embedding model). The
+model gets a short numbered digest and answers with `[n]` citations; the
+chat service appends the Sources list (`_with_sources`), and the UI turns
+`[n]` into links. `research_report` writes the same into a Word document.
+
+- Pages download in parallel but are parsed **one at a time on one thread**
+  (`_PAGE_READER`): trafilatura shares one lxml parser, and two threads
+  parsing at once crashed the backend.
+- `weather.py` answers forecasts from Open-Meteo directly (no key), for the
+  city in the profile, else where the internet connection is.
+
+## Keeping the model honest (v4)
+
+`chat/service.py` checks what the model says against what its tools did:
+
+- **Claims** ("I've sent it") with no tool behind them get one push to
+  actually do it; a claim that survives is cut from the reply.
+- **"No"** is respected — after a denial nothing pushes it to act anyway.
+- **Make before send** — "write X and send it to me" sorts the calls so the
+  file exists before it's sent; a guessed path is swapped for the real one.
+- **No repeats** — after sending an answer to the phone, a reply that copies
+  that answer (runs of its words) becomes the short confirmation.
+- **Research first** — a document "about" a topic is researched before it's
+  written, and an email that mentions an attachment must carry one.
+
+## Apple Music (v4)
+
+`music_play` tries the user's library first (AppleScript). Otherwise it
+finds the song in the Apple Music catalogue (Apple's iTunes Search API,
+`best_match` prefers the asked-for artist over remixes), opens it in Music
+with `music://…?i=<track>`, selects its row through Accessibility and uses
+*Play Next*, then skips to it — so nothing is added to the library. Music
+requests go to Apple Music unless the user says YouTube or video
+(`_music_service`).
+
+## Smart lights (v4)
+
+`lights.py` controls Tapo / Kasa lights on the local network with
+python-kasa. Connecting uses the Tapo account once: each light's derived key
+(`credentials_hash`) is saved in `~/.jarvis/lights.json` (mode 600), never
+the password. Lights are told apart from cameras by the family they announce
+before sign-in (`SMART.TAPOBULB`), found again by MAC if their address
+changes, and a light that doesn't answer is skipped for a minute so status
+checks never stall.
+
+macOS's Local Network privacy can block an app without ever asking (a known
+macOS bug). So the network work runs in `lights_helper.py`: a small Python
+process started with `posix_spawn` as its **own responsible process**
+(`responsibility_spawnattrs_setdisclaim`), which macOS lists — and the user
+allows — as *Python*, while every other permission stays Jarvis's. It reads
+JSON requests on stdin, answers on stdout, restarts if it stops and exits
+with Jarvis. `JARVIS_LIGHTS_DIRECT=1` (tests, other OSes) runs in-process.
 
 ## Roadmap hooks (already scaffolded)
 
