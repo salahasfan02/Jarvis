@@ -74,6 +74,8 @@ register(Agent(
            "ui_type (fill a field or type), press_keys (shortcuts like cmd+t), scroll, "
            "drag; ui_elements lists what an app's window contains when unsure. "
            "To open a document or folder on the Mac use open_file. "
+           "\"Fill in this form (with my details)\": call fill_form straight away — it finds "
+           "the fields and the user's saved details itself; don't look at the screen first. "
            "Confirm what you did after each action.",
     tool_tags=["automation", "files", "browser", "music", "notes", "calendar"]))
 
@@ -175,6 +177,8 @@ _ROUTE_EXAMPLES: dict[str, list[str]] = {
                    "set a reminder for 6pm", "what's on my calendar",
                    "copy this to my clipboard", "give me my daily briefing",
                    "what tabs do I have open", "close the github tab",
+                   "fill in this form with my details", "fill out the sign-up form",
+                   "set a timer for 10 minutes", "turn the volume up",
                    "click on the sign in button", "press subscribe", "open my CV",
                    "open the report on my desktop"],
 }
@@ -233,7 +237,8 @@ _ROUTE_KEYWORDS: dict[str, list[str]] = {
                   "draft", "reply to", "inbox", "unread"],
     "automation": ["open", "close", "launch", "quit", "safari", "chrome", "app",
                    "note", "reminder", "calendar", "clipboard", "tab", "window",
-                   "youtube", "click", "press", "tap on"],
+                   "youtube", "click", "press", "tap on", "form", "fill in", "fill out",
+                   "timer", "volume"],
 }
 
 

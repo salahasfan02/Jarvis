@@ -694,6 +694,26 @@ export function SettingsPage(props: {
         </div>
 
         <div className="panel">
+          <h3>About you</h3>
+          <div className="sub" style={{ marginBottom: 8 }}>
+            Used to fill in forms (“fill this in with my details”) and sign emails. Stored only
+            on this Mac. Jarvis never fills passwords, card or bank details.
+          </div>
+          {([["full_name", "Full name"], ["email", "Email"], ["phone", "Phone"],
+             ["address_line1", "Address line 1"], ["address_line2", "Address line 2"],
+             ["city", "Town / city"], ["county", "County / state"], ["postcode", "Postcode / ZIP"],
+             ["country", "Country"], ["company", "Company"], ["job_title", "Job title"],
+             ["website", "Website"], ["signature", "Email sign-off"]] as const).map(([key, label]) => (
+            <Row key={key} label={label}>
+              <input className="search" style={{ width: 300 }}
+                     defaultValue={(s as any).profile?.[key] ?? ""}
+                     placeholder={key === "signature" ? "e.g. Best, Salah" : ""}
+                     onBlur={(e) => props.onPatch({ profile: { [key]: e.target.value.trim() } } as any)} />
+            </Row>
+          ))}
+        </div>
+
+        <div className="panel">
           <h3>Off-limits for screen control</h3>
           <Row label="Apps" sub="Jarvis never presses, types or clicks in these (comma-separated)">
             <textarea className="search" rows={2} style={{ width: 340 }}

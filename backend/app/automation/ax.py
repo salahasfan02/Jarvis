@@ -105,10 +105,22 @@ def app_element(name: str = ""):
     return focused, _text(_attr(focused, "AXTitle"))
 
 
+def _find_role(root, role: str, deadline: float):
+    """First descendant of `root` with `role` (breadth-first), or None."""
+    queue = [root]
+    while queue and time.time() < deadline:
+        el = queue.pop(0)
+        if _text(_attr(el, "AXRole")) == role:
+            return el
+        queue.extend(list(_attr(el, "AXChildren") or []))
+    return None
+
+
 def elements(app_name: str = "", limit: int = 300, include_menus: bool = False,
-             deadline_s: float = 2.5) -> tuple[list[Element], str]:
+             deadline_s: float = 2.5, page_only: bool = False) -> tuple[list[Element], str]:
     """Actionable elements in the app's focused window (plus its menu bar if
-    asked), in reading order."""
+    asked), in reading order. page_only: in a browser, only the web page —
+    never the address bar or the browser's own controls."""
     AS = _AS()
     app, name = app_element(app_name)
     if app is None:
@@ -118,6 +130,10 @@ def elements(app_name: str = "", limit: int = 300, include_menus: bool = False,
     AS.AXUIElementSetAttributeValue(app, "AXManualAccessibility", True)
     roots = []
     window = _attr(app, "AXFocusedWindow") or _attr(app, "AXMainWindow")
+    if window is not None and page_only:
+        web = _find_role(window, "AXWebArea", time.time() + deadline_s / 2)
+        if web is not None:
+            window = web
     if window is not None:
         roots.append(window)
     if include_menus and (bar := _attr(app, "AXMenuBar")) is not None:

@@ -81,9 +81,12 @@ def _static_system_prompt(agent: agents.Agent | None = None) -> str:
         "require the user's confirmation; if one is denied, respect that and "
         "explain what you would have done.")
     parts.append(CONTEXT_RULES)
-    if user := _user_full_name():
+    from ..memory import profile
+    me = profile.get()
+    if user := (me.get("full_name") or _user_full_name()):
+        sign = me.get("signature") or user
         parts.append(f"The user's name is {user}. Sign emails and messages you write "
-                     f"for them as {user}; never leave placeholders like [Your Name].")
+                     f"for them as: {sign} — never leave placeholders like [Your Name].")
     return "\n\n".join(parts)
 
 

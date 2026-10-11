@@ -109,6 +109,11 @@ CASES = [
     {"say": "explain what a REST API is in two sentences", "no_tools": True},
     {"say": "tell me a joke", "no_tools": True},
 
+    # --- me profile & forms -----------------------------------------------------------------------
+    {"say": "fill in this form with my details", "tools": ["fill_form"]},
+    {"say": "my phone number is 07700 900123", "tools": ["update_my_details"],
+     "args": {"update_my_details": {"phone": "07700 ?900123"}}},
+
     # --- spoken: short answers you can listen to ------------------------------------------------
     {"say": "what's the latest AI news", "spoken": True, "tools": ["web_search"], "max_chars": 450},
     {"say": "explain how a heat pump works", "spoken": True, "no_tools": True, "max_chars": 450},

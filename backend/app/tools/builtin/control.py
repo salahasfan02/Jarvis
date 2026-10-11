@@ -78,6 +78,9 @@ def type_unicode(text: str) -> bool:
         chunk = text[i:i + 16]
         for down in (True, False):
             ev = Quartz.CGEventCreateKeyboardEvent(src, 0, down)
+            # No modifiers: inherited flags (e.g. Cmd right after Cmd+A) made
+            # apps treat the text as shortcuts, so nothing was typed.
+            Quartz.CGEventSetFlags(ev, 0)
             Quartz.CGEventKeyboardSetUnicodeString(ev, len(chunk), chunk)
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
         time.sleep(0.012)
