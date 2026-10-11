@@ -124,8 +124,21 @@ app.mount("/projects", SandboxedFiles(directory=str(_projects), html=True), name
 _ui = next((d for d in (Path(os.environ.get("JARVIS_UI_DIR") or "/nonexistent"),
                         Path(__file__).resolve().parents[2] / "frontend" / "dist")
             if (d / "index.html").is_file()), None)
+class UIFiles(StaticFiles):
+    """The page is re-checked on every load — with no Cache-Control, a browser
+    guesses it's still fresh and an updated Jarvis kept showing its old screens.
+    The scripts and styles it names carry a hash of their contents, so those
+    can be kept for good."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = ("public, max-age=31536000, immutable"
+                                             if path.startswith("assets/") else "no-cache")
+        return response
+
+
 if _ui:
-    app.mount("/app", StaticFiles(directory=str(_ui), html=True), name="ui")
+    app.mount("/app", UIFiles(directory=str(_ui), html=True), name="ui")
 
 
 @app.get("/")

@@ -21,20 +21,38 @@ const SECTIONS = [
 ];
 
 /** Which section is in view, for the menu on the left. */
+/** The section being read: the last one whose top has reached the top of the page.
+ *  (Picking among the sections that just came into view chose "Memory" right after
+ *  a jump to the short "Smart lights" panel above it.) */
 function useSectionSpy(rootRef: React.RefObject<HTMLDivElement>, ready: boolean) {
   const [active, setActive] = useState(SECTIONS[0].id);
+  const jumping = useRef(false);
   useEffect(() => {
     const root = rootRef.current;
     if (!root || !ready) return;
-    const obs = new IntersectionObserver((entries) => {
-      const seen = entries.filter((e) => e.isIntersecting)
-        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-      if (seen[0]) setActive(seen[0].target.id);
-    }, { root, rootMargin: "0px 0px -65% 0px" });
-    SECTIONS.forEach((sec) => { const el = document.getElementById(sec.id); if (el) obs.observe(el); });
-    return () => obs.disconnect();
+    let settle = 0;
+    const onScroll = () => {
+      window.clearTimeout(settle);
+      settle = window.setTimeout(() => { jumping.current = false; }, 150);
+      // A jump from the menu keeps its section — even one too near the end to reach the top.
+      if (jumping.current) return;
+      const line = root.getBoundingClientRect().top + 120;
+      let current = SECTIONS[0].id;
+      for (const sec of SECTIONS) {
+        const el = document.getElementById(sec.id);
+        if (el && el.getBoundingClientRect().top <= line) current = sec.id;
+      }
+      setActive(current);
+    };
+    root.addEventListener("scroll", onScroll, { passive: true });
+    return () => { root.removeEventListener("scroll", onScroll); window.clearTimeout(settle); };
   }, [ready]);
-  return [active, setActive] as const;
+  const jumpTo = (id: string) => {
+    jumping.current = true;
+    setActive(id);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  return [active, jumpTo] as const;
 }
 import { API, api, OllamaModel, pullModel, statsApi } from "../lib/api";
 import { recordUtterance, VoiceDiag, voiceBus, voiceDiag } from "../lib/voice";
@@ -326,7 +344,7 @@ export function SettingsPage(props: {
 }) {
   const s = props.settings;
   const pageRef = useRef<HTMLDivElement>(null);
-  const [activeSection, setActiveSection] = useSectionSpy(pageRef, !!s);
+  const [activeSection, jumpToSection] = useSectionSpy(pageRef, !!s);
   const [choosingPicture, setChoosingPicture] = useState(false);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [pullName, setPullName] = useState("");
@@ -488,10 +506,7 @@ export function SettingsPage(props: {
         <nav className="settings-nav" aria-label="Settings sections">
           {SECTIONS.map((sec) => (
             <button key={sec.id} className={activeSection === sec.id ? "active" : ""}
-                    onClick={() => {
-                      setActiveSection(sec.id);
-                      document.getElementById(sec.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }}>
+                    onClick={() => jumpToSection(sec.id)}>
               <sec.icon /> {sec.label}
             </button>
           ))}
