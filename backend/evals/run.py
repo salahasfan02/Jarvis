@@ -184,6 +184,9 @@ def fake_output(name: str, args: dict) -> str:
         return "No matching notes."
     if name == "send_file":
         return f"Sent {args.get('path')} to the user's phone."
+    if name == "send_to_phone":
+        return ("Sent to your phone on Telegram." if not args.get("as_document")
+                else "Sent the Word document to your phone on Telegram.")
     if name == "daily_briefing":
         return "Briefing: 2 meetings today, 3 unread emails, sunny 18°C."
     return "Done."

@@ -98,6 +98,9 @@ class ScriptedLLM:
             name, args = rest
             yield {"message": {"content": "", "tool_calls": [
                 {"function": {"name": name, "arguments": args}}]}, "done": True}
+        elif kind == "multi":    # several tool calls in one round
+            yield {"message": {"content": "", "tool_calls": [
+                {"function": {"name": n, "arguments": a}} for n, a in rest[0]]}, "done": True}
         elif kind == "both":     # words, then a tool call, in the same round
             text, name, args = rest
             yield {"message": {"content": text}, "done": False}
@@ -449,7 +452,7 @@ def test_a_spoken_yes_approves_the_open_question(env, monkeypatch, tmp_path):
 
 def test_an_empty_model_reply_is_retried_not_reported_as_done(env):
     fake, make_bot, script = env
-    script(answer(""), answer(""))
+    script(answer(""), answer(""), answer(""))   # pushed to send, then to say anything
 
     async def main():
         bot = make_bot()
@@ -783,3 +786,178 @@ def test_a_false_claim_repeated_after_the_nudge_is_taken_out(env, monkeypatch, t
     run(main())
     final = fake.texts()[-1]
     assert "sent you" not in final and "screenshot from today" in final
+
+
+# --- "send that to me" said at the Mac ------------------------------------------------
+
+def _mac_chat(*turns):
+    from app import db
+    conv = db.create_conversation()["id"]
+    for role, text in turns:
+        db.add_message(conv, role, text)
+    return conv
+
+
+async def _mac_turn(conv, text):
+    from app.chat import service as chat_service
+    return [e async for e in chat_service.run_chat(conv, text)]
+
+
+WEATHER = ("user", "what's the weather today"), ("assistant", "It's **16°C** and cloudy in London.")
+
+
+def test_send_that_to_me_at_the_mac_goes_to_telegram(env, monkeypatch):
+    fake, make_bot, script = env
+    llm = script()
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        events = await _mac_turn(_mac_chat(*WEATHER), "Can you send that to me?")
+        await bot.stop()
+        return events
+
+    events = run(main())
+    done = next(e for e in events if e["type"] == "done")
+    assert done["content"] == "Sent to your phone on Telegram."
+    msg = fake.sent("sendMessage")[-1]
+    assert msg["chat_id"] == USER["id"] and "<b>16°C</b>" in msg["text"]
+    assert llm.rounds == []                                   # instant: no model, no repeat
+    assert not any(e["type"] == "confirm_request" for e in events)   # they asked
+
+
+def test_send_me_the_whole_chat(env, monkeypatch):
+    fake, make_bot, script = env
+    script()
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        await _mac_turn(_mac_chat(*WEATHER, ("user", "and tomorrow?"),
+                                  ("assistant", "Tomorrow: 14–17°C with drizzle.")),
+                        "send me the whole chat")
+        await bot.stop()
+
+    run(main())
+    text = fake.sent("sendMessage")[-1]["text"]
+    assert "You:" in text and "Jarvis:" in text
+    assert "16°C" in text and "drizzle" in text and "whole chat" not in text
+
+
+def test_put_that_in_a_document_and_send_it(env, monkeypatch):
+    fake, make_bot, script = env
+    script()
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        await _mac_turn(_mac_chat(*WEATHER), "put that in a word document and send it to me")
+        await bot.stop()
+
+    run(main())
+    name, data = fake.sent("sendDocument")[-1]["_files"]["document"]
+    assert name.endswith(".docx")
+    body = "\n".join(p.text for p in docx.Document(io.BytesIO(data)).paragraphs)
+    assert "16°C" in body
+
+
+def test_send_that_to_me_without_telegram_says_how_to_set_it_up(env, monkeypatch):
+    fake, make_bot, script = env
+    script()
+    monkeypatch.setattr(tg, "_bot", None)
+    events = run(_mac_turn(_mac_chat(*WEATHER), "send that to me"))
+    done = next(e for e in events if e["type"] == "done")
+    assert "Settings → Phone" in done["content"] and "Sent" not in done["content"]
+    assert fake.sent("sendMessage") == []
+
+
+def test_repeating_the_answer_instead_of_sending_it_gets_pushed(env, monkeypatch):
+    """The original failure: asked to send the weather, it said the weather again."""
+    fake, make_bot, script = env
+    llm = script(answer("It's 16°C and cloudy in London."),
+                 tool("send_to_phone", {"what": "last_answer"}),
+                 answer("Done — it's on your phone."))
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        events = await _mac_turn(_mac_chat(*WEATHER), "can you send the weather you just gave me to me?")
+        await bot.stop()
+        return events
+
+    events = run(main())
+    assert "send_to_phone" in llm.rounds[1]["messages"][-1]["content"]
+    assert "send_to_phone" in llm.rounds[1]["tools"]
+    assert "16°C" in fake.sent("sendMessage")[-1]["text"]
+    final = next(e for e in events if e["type"] == "done")["content"]
+    assert final == "Done — it's on your phone."
+
+
+def test_a_document_is_made_before_it_is_sent(env, monkeypatch, tmp_path):
+    """Both called at once, send first, with a guessed file name."""
+    fake, make_bot, script = env
+    doc = tmp_path / "electric-cars.docx"
+
+    async def report(topic, detail="detailed"):
+        doc.write_bytes(b"PK report")
+        return f"Created Word document 'Electric cars' (870 words) at {doc}. Written from 5 web sources."
+
+    monkeypatch.setattr(registry.get("research_report"), "handler", report)
+    script(lambda msgs: ("multi", [("send_file", {"path": "~/Documents/Jarvis/Electric Cars Report.docx"}),
+                                   ("research_report", {"topic": "electric cars"})]),
+           answer("Your report is on your phone."))
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        await _mac_turn(_mac_chat(), "write a report about electric cars as a word document and send it to me")
+        await bot.stop()
+
+    run(main())
+    assert fake.sent("sendDocument")[0]["_files"]["document"][0] == "electric-cars.docx"
+
+
+def test_send_it_to_me_after_making_a_document_sends_the_document(env, monkeypatch, tmp_path):
+    fake, make_bot, script = env
+    llm = script()
+    doc = tmp_path / "mcp-servers-overview.docx"
+    doc.write_bytes(b"PK doc")
+    from app import db
+    conv = db.create_conversation()["id"]
+    db.add_message(conv, "user", "write a word document about mcp servers")
+    db.add_message(conv, "assistant", "I've created the Word document 'MCP Servers Overview'.",
+                   meta={"tools": [{"name": "research_report", "arguments": {"topic": "mcp"},
+                                    "result": f"Created Word document 'MCP Servers Overview' (612 words) at {doc}. "
+                                              "Written from 5 web sources."}]})
+
+    async def main():
+        bot = make_bot()
+        monkeypatch.setattr(tg, "_bot", bot)
+        await _mac_turn(conv, "send it to me")
+        await bot.stop()
+
+    run(main())
+    assert fake.sent("sendDocument")[0]["_files"]["document"][0] == "mcp-servers-overview.docx"
+    assert fake.sent("sendMessage") == [] and llm.rounds == []
+
+
+def test_email_this_attaches_the_document_on_screen(env, monkeypatch):
+    fake, make_bot, script = env
+    from app.automation import selection
+    from app.security.permissions import confirmations
+    monkeypatch.setattr(selection, "describe", lambda: (
+        "App the user is in: Preview\nOpen document: /Users/me/Documents/lease.pdf  "
+        "(read it with read_document; attach this path)"))
+    script(tool("send_email", {"to": "a@b.com", "subject": "Lease", "body": "Here it is."}),
+           answer("Okay, not sent."))
+    asked = []
+
+    async def main():
+        from app.chat import service as chat_service
+        async for e in chat_service.run_chat(_mac_chat(), "email this to a@b.com"):
+            if e["type"] == "confirm_request":
+                asked.append(e)
+                confirmations.resolve(e["id"], False)
+
+    run(main())
+    assert asked[0]["arguments"]["attachments"] == ["/Users/me/Documents/lease.pdf"]

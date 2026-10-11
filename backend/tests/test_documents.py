@@ -110,7 +110,8 @@ def test_send_file_refuses_oversized_and_missing_files(tmp_path):
     assert ch.sent == []
 
 
-def test_send_file_at_the_mac_does_not_send(tmp_path):
+def test_send_file_at_the_mac_without_telegram_shows_it_instead(tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("x")
-    assert "nothing was sent" in asyncio.run(documents.send_file(str(f)))
+    out = asyncio.run(documents.send_file(str(f)))
+    assert out.startswith("Nothing was sent") and "Settings → Phone" in out

@@ -141,6 +141,7 @@ const STEP: Record<string, [string, string]> = {
   read_file: ["Reading the file", "Read the file"],
   write_file: ["Writing the file", "Wrote the file"],
   send_file: ["Sending the file", "Sent the file"],
+  send_to_phone: ["Sending to your phone", "Sent to your phone"],
   move_file: ["Moving the file", "Moved the file"],
   trash_file: ["Moving to the Bin", "Moved to the Bin"],
   create_folder: ["Creating the folder", "Created the folder"],
@@ -241,6 +242,11 @@ export function describeAction(tool: string, args: Record<string, any>): ActionS
       return { title: tool === "send_reply" ? "Send a reply" : "Draft a reply", lines: pick(["Message", a.body]) };
     case "send_file":
       return { title: "Send a file to your phone", lines: pick(["File", base(a.path)], ["From", a.path], ["Note", a.caption]) };
+    case "send_to_phone":
+      return { title: "Send to your phone",
+               lines: pick(["What", a.what === "conversation" ? "This whole chat"
+                                   : a.what === "text" ? s(a.text).slice(0, 300) : "My last answer"],
+                           ["As", a.as_document ? "A Word document" : "A Telegram message"]) };
     case "trash_file":
       return { title: "Move to the Bin", lines: pick(["File", base(a.path)], ["From", a.path]) };
     case "move_file":

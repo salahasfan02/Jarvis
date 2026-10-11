@@ -341,6 +341,45 @@ class TelegramSession(ChannelSession):
         audit.log("telegram_file_sent", path=str(path), bytes=len(data))
         return f"Sent {path.name} ({len(data) // 1024} KB) to the user's phone via Telegram."
 
+    async def send_text(self, text: str) -> str:
+        try:
+            await self.bot.send_markdown(self.chat_id, text)
+        except (TelegramError, httpx.HTTPError) as e:
+            return f"Could not send it: {_redact(str(e))}"
+        audit.log("telegram_text_sent", chars=len(text))
+        return "Sent to your phone on Telegram."
+
+
+class OwnerSession(ChannelSession):
+    """"Send it to me" said at the Mac: the paired phone(s), on Telegram."""
+    name = "Telegram"
+
+    def __init__(self, bot: "TelegramBot", chats: list[int]) -> None:
+        self.sessions = [TelegramSession(bot, c) for c in chats]
+
+    async def send_file(self, path: Path, caption: str = "") -> str:
+        results = [await s.send_file(path, caption) for s in self.sessions]
+        return next((r for r in results if r.startswith("Could not")), results[0])
+
+    async def send_text(self, text: str) -> str:
+        results = [await s.send_text(text) for s in self.sessions]
+        return next((r for r in results if r.startswith("Could not")), results[0])
+
+
+def owner() -> OwnerSession | None:
+    """Where "send it to me" goes from the Mac, or None if no phone is set up."""
+    chats = [int(u["id"]) for u in allowed_users() if u.get("id")]
+    return OwnerSession(_bot, chats) if _bot is not None and chats else None
+
+
+def why_not_owner() -> str:
+    if not read_token():
+        return ("Telegram isn't set up, so there's no phone to send it to — connect it in "
+                "Settings → Phone.")
+    if _bot is None:
+        return "Telegram is switched off — turn it on in Settings → Phone to get things on your phone."
+    return "No phone is paired with Telegram yet — pair one in Settings → Phone."
+
 
 # --- the bot ----------------------------------------------------------------------
 

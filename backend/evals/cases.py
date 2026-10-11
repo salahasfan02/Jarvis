@@ -10,6 +10,11 @@
 """
 
 ME = "asfansalah46@gmail.com"
+WEATHER_CHAT = [
+    {"role": "user", "content": "what's the weather today"},
+    {"role": "assistant", "content": "It's 16°C and cloudy in London, with light rain likely from 6pm.",
+     "meta": {"agent": "research", "tools": [{"name": "weather", "arguments": {}, "result": "…"}]}},
+]
 
 CASES = [
     # --- instant commands / apps / browser -----------------------------------
@@ -165,7 +170,7 @@ CASES = [
     {"say": "Can you write a word document about mcp servers, with deep explanation, then send it to me",
      "phone": True, "tools": [["research_report", "create_word_document"], "send_file"],
      "reply_not": r"(?i)master control|i'?ll send it"},
-    {"say": "Send it to me", "phone": True, "tools": ["send_file"],
+    {"say": "Send it to me", "phone": True, "tools": [["send_file", "send_to_phone"]],
      "args": {"send_file": {"path": "mcp-servers-overview"}},
      "history": [
          {"role": "user", "content": "Can you write a word document about mcp servers"},
@@ -175,6 +180,18 @@ CASES = [
                    "result": "Created Word document 'MCP Servers Overview' (612 words) at "
                              "/Users/salah/Documents/Jarvis/mcp-servers-overview.docx. If the user wants it on their phone, call "
                              "send_file with this path."}]}}]},
+
+    # --- "send it to me" at the Mac = the phone (Telegram) ----------------------------------------
+    {"say": "Can you send that to me?", "tools": ["send_to_phone"],
+     "args": {"send_to_phone": {"what": "last_answer"}}, "history": WEATHER_CHAT},
+    {"say": "could you send the weather you just gave me to my phone", "tools": ["send_to_phone"],
+     "reply_not": r"(?i)16\s*°?C.*cloud", "history": WEATHER_CHAT},
+    {"say": "send me the whole chat", "tools": ["send_to_phone"],
+     "args": {"send_to_phone": {"what": "conversation"}}, "history": WEATHER_CHAT},
+    {"say": "put that in a document and send it to me", "tools": ["send_to_phone"],
+     "args": {"send_to_phone": {"as_document": "true"}}, "history": WEATHER_CHAT},
+    {"say": "write a short report about electric cars as a word document and send it to me",
+     "tools": [["research_report", "create_word_document"], "send_file"]},
 
     # --- the internet ---------------------------------------------------------------------------
     {"say": "what's the weather today", "tools": ["weather"], "reply": r"16|°"},

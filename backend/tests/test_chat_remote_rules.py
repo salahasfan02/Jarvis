@@ -34,6 +34,5 @@ def test_desktop_turns_keep_their_tools_and_confirmations(monkeypatch):
     events = asyncio.run(main())
     kinds = [e["type"] for e in events]
     assert "confirm_request" in kinds          # asked, not blocked
-    assert "send_file" not in offered[0]       # phone-only tool stays off the desktop
     assert "create_word_document" in offered[0]
     assert events[-1]["type"] in ("done", "title")

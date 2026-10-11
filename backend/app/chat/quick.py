@@ -267,6 +267,31 @@ def _instant(t: str, low: str) -> QuickAction | None:
     # undo
     if re.fullmatch(r"undo(?: that| it| the last (?:thing|action))?|put it back|take that back", low):
         return QuickAction("undo_last", {}, "")
+    # "send that to me" / "send me the whole chat" / "put that in a document and send it to me"
+    if action := _send_to_me(low):
+        return action
+    return None
+
+
+_PHONE = r"(?: on telegram| via telegram| on my phone| to my phone| as a (?:text|message|telegram message))?"
+_IT = r"(?:it|that|this|the (?:answer|reply|last (?:answer|message|reply)))"
+_CHAT = r"(?:the |this |our |my )?(?:whole |entire |full )?(?:chat|conversation)(?: history)?"
+_DOC = r"(?:a )?(?:word )?(?:doc|document|docx)"
+
+
+def _send_to_me(low: str) -> QuickAction | None:
+    """Sending to the user's phone (Telegram). The reply is the tool's own
+    words, so "Telegram isn't set up" is said instead of a cheerful "Sent"."""
+    if re.fullmatch(rf"send {_IT}(?: back| over)?(?: to me)?{_PHONE}|send me {_IT}{_PHONE}"
+                    rf"|text (?:it|that) to me|text me (?:it|that)", low):
+        return QuickAction("send_to_phone", {"what": "last_answer"}, "")
+    if re.fullmatch(rf"send (?:me )?{_CHAT}(?: to me)?{_PHONE}", low):
+        return QuickAction("send_to_phone", {"what": "conversation"}, "")
+    if m := re.fullmatch(rf"(?:put|save|turn|make|write) ({_IT}|{_CHAT}) (?:in|into|as|to) {_DOC}"
+                         rf"(?:,)?(?: and)? send (?:it|that)(?: to me)?{_PHONE}"
+                         rf"|send ({_IT}|{_CHAT})(?: to me)? as {_DOC}{_PHONE}", low):
+        what = "conversation" if re.search(r"chat|conversation", m.group(1) or m.group(2) or "") else "last_answer"
+        return QuickAction("send_to_phone", {"what": what, "as_document": True}, "")
     return None
 
 

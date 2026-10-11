@@ -328,9 +328,9 @@ def _folder_size(folder: Path, limit: int) -> int:
 
 @tool(
     name="send_file",
-    description="Send a file (or a whole folder, zipped) from this Mac to the user's phone, "
-                "in the chat they're messaging from. Needs the exact path: find it first "
-                "with search_files or list_directory if unsure. Max 50 MB.",
+    description="Send a file (or a whole folder, zipped) from this Mac to the user's phone "
+                "on Telegram — 'send me my CV', 'send it to me'. Needs the exact path: find "
+                "it first with search_files or list_directory if unsure. Max 50 MB.",
     parameters={
         "type": "object",
         "properties": {
@@ -340,7 +340,6 @@ def _folder_size(folder: Path, limit: int) -> int:
         "required": ["path"],
     },
     risk="confirm",          # the user sees exactly which file leaves the Mac
-    agent_tags=["remote"],   # offered on phone turns (and to the all-tools planner)
 )
 async def send_file(path: str, caption: str = "") -> str:
     p, suggestions = await asyncio.to_thread(resolve_path, path)
@@ -350,13 +349,16 @@ async def send_file(path: str, caption: str = "") -> str:
                 "path with search_files or list_directory, then call send_file again.")
     channel = channels.current.get()
     if channel is None:
-        # Chatting at the Mac: there is no phone to send to, so show it instead.
-        try:
-            subprocess.run(["open", "-R", str(p)], timeout=10)
-        except (OSError, subprocess.SubprocessError):
-            pass
-        return (f"The user is at the Mac, so nothing was sent — {p} was revealed in "
-                "Finder instead.")
+        # At the Mac, "send it to me" means the user's phone.
+        from ...channels import telegram
+        channel = telegram.owner()
+        if channel is None:
+            try:
+                subprocess.run(["open", "-R", str(p)], timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            return (f"Nothing was sent — {telegram.why_not_owner()} {p} was shown in "
+                    "Finder instead.")
 
     limit = channel.max_file_bytes
     if p.is_dir():

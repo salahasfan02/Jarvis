@@ -90,6 +90,10 @@ def _static_system_prompt(agent: agents.Agent | None = None) -> str:
         "means). Answer from what research returns, with [1], [2] after the facts and a "
         "Sources list at the end. A document or report about a real topic is made with "
         "research_report, which researches and writes it. For weather, use the weather tool.")
+    parts.append(
+        "\"Send it/that to me\" means the user's phone, on Telegram: send_to_phone sends your "
+        "last answer or the whole chat as a message (as_document=true for a Word document); "
+        "send_file sends a file. Never just repeat the answer instead.")
     parts.append(CONTEXT_RULES)
     from ..memory import profile
     me = profile.get()
@@ -341,9 +345,24 @@ FILE_NUDGE = ("(They asked for a FILE, not text in the chat. Create it now: rese
               "create_word_document / create_spreadsheet / create_presentation with the full "
               "content inside. Don't apologise or mention this note.)")
 _MAKES_FILE = ("create_", "research_report")
-SEND_NUDGE = ("(They asked you to send it to their phone. Call send_file now with the exact "
-              "path from the results above — don't describe it or link to it. Don't apologise "
-              "or mention this note.)")
+SEND_NUDGE = ("(They asked you to send it to them — that means their phone, on Telegram. "
+              "Call send_to_phone now (what='last_answer' for your previous answer, "
+              "'conversation' for the whole chat, as_document=true for a document) or "
+              "send_file with the exact path of a file. Don't repeat the answer here, don't "
+              "apologise or mention this note.)")
+# "send it/that to me", "send me the chat", "…to my phone / on telegram"
+_SEND_TO_ME = re.compile(r"\bsend\b[^.?!]{0,60}?\b(?:to\s+me|me|to\s+my\s+phone|on\s+telegram)\b"
+                         r"|\bsend\s+(?:it|that|this|them)\b", re.I)
+_NOT_NOW = re.compile(r"\be-?mail|\b(?:every|each|daily|weekly|whenever|when|tomorrow|tonight|"
+                      r"remind|routine|schedule)\b|\bat\s+\d|\bin\s+\d+\s*(?:min|hour)", re.I)
+_TO_SOMEONE = re.compile(r"\bto\s+(?!me\b|my\s+phone\b|telegram\b)\w+", re.I)
+
+
+def _wants_it_sent(text: str) -> bool:
+    """'Send that to me' / 'send me the chat' — to the user, now. Not a routine
+    ('every morning send me…'), an email, or something for someone else."""
+    return (bool(_SEND_TO_ME.search(text)) and not _NOT_NOW.search(text)
+            and not _TO_SOMEONE.search(text))
 _SENDS_MESSAGE = re.compile(r"\b(?:e-?mail|mail|text|message|imessage|whatsapp|reply)\b", re.I)
 INTENT_NUDGE = ("(You said you would do that, but you didn't call the tool. Call it now — "
                 "don't describe it, don't apologise.)")
@@ -643,6 +662,7 @@ async def assemble(conversation_id: str, conv: dict, agent: agents.Agent,
 async def run_chat(conversation_id: str, user_content: str,
                    spoken: bool = False) -> AsyncIterator[dict]:
     started = time.perf_counter()
+    channels.conversation.set(conversation_id)   # "send me the whole chat"
     db.add_message(conversation_id, "user", user_content)
     history = db.get_messages(conversation_id)
     conv = db.get_conversation(conversation_id) or {}
@@ -713,6 +733,8 @@ async def run_chat(conversation_id: str, user_content: str,
     research_first = False        # a document about a topic was sent to research first
     send_nudged = False           # phone: pushed to actually send what they asked for
     attach_checked = False        # an email missing the file they asked for, sent back once
+    made_files: list[str] = []    # documents made this turn (for "…and send it")
+    send_first_checked = False    # a send of a not-yet-made file, sent back once
     final_text = ""               # the last round's words (after all the tools)
     mistakes: list[str] = []      # what went wrong this turn (-> learned test cases)
 
@@ -836,19 +858,19 @@ async def run_chat(conversation_id: str, user_content: str,
                     llm_messages.append({"role": "user", "content": INTENT_NUDGE})
                     continue
                 channel = channels.current.get()
-                if (tool_schemas and not send_nudged and not said_no and tool_events and channel is not None
+                if (tool_schemas and not send_nudged and not said_no
                         and not getattr(channel, "auto_approve", False)
-                        and _ASKED_TO_SEND.search(user_content)
-                        and not _SENDS_MESSAGE.search(user_content)
-                        and not any(e["name"] == "send_file" and _took_effect(e["result"])
-                                    for e in tool_events)):
+                        and _wants_it_sent(user_content)
+                        and not any(e["name"] in ("send_file", "send_to_phone")
+                                    and _took_effect(e["result"]) for e in tool_events)):
                     # "Send me the latest screenshot": found it, then showed a
                     # made-up link instead of sending it.
                     send_nudged = True
                     mistakes.append("found the file but didn't send it")
-                    if (send := tools.registry.get("send_file")) and send not in tool_list:
-                        tool_list = tool_list + [send]
-                        tool_schemas = [x.to_ollama() for x in tool_list]
+                    for extra in ("send_to_phone", "send_file"):
+                        if (t := tools.registry.get(extra)) and t not in tool_list:
+                            tool_list = tool_list + [t]
+                    tool_schemas = [x.to_ollama() for x in tool_list]
                     llm_messages.append({"role": "assistant", "content": round_text})
                     llm_messages.append({"role": "user", "content": SEND_NUDGE})
                     full_response = full_response[:len(full_response) - len(round_text)]
@@ -872,6 +894,10 @@ async def run_chat(conversation_id: str, user_content: str,
                 yield {"type": "reset_text", "content": full_response}
             announced = False
 
+            # Make before send: "write a report and send it" called both at once,
+            # with the send first.
+            tool_calls = sorted(tool_calls, key=lambda tc: 0 if str(
+                tc.get("function", {}).get("name", "")).startswith(_MAKES_FILE) else 1)
             for tc in tool_calls:
                 fn = tc.get("function", {})
                 name = _respect_intent(user_content, fn.get("name", ""))
@@ -883,6 +909,18 @@ async def run_chat(conversation_id: str, user_content: str,
                         args = json.loads(args)
                     except json.JSONDecodeError:
                         args = {}
+                if name == "send_file" and isinstance(args, dict) and not _exists(args.get("path")):
+                    if made_files:
+                        # It guessed the name of the document it just made.
+                        args = {**args, "path": made_files[-1]}
+                    elif _WANTS_FILE.search(user_content) and not send_first_checked:
+                        send_first_checked = True
+                        mistakes.append("sent a file before making it")
+                        llm_messages.append({"role": "tool", "tool_name": name, "content": (
+                            "Not sent: that file doesn't exist yet. Make it first (research_report "
+                            "for a topic, or create_word_document), then send_file the path it "
+                            "returns.")})
+                        continue
 
                 if (name in _DOC_TOOLS and not research_first and not sources
                         and _ABOUT_TOPIC.search(user_content)
@@ -902,6 +940,13 @@ async def run_chat(conversation_id: str, user_content: str,
                     # "Remind me to call mum at 6pm" with the time left out of the
                     # call: the reminder would come with no alert at all.
                     args = {**args, "due": due.strftime("%Y-%m-%d %H:%M")}
+                if (name in ("send_email", "draft_email") and isinstance(args, dict)
+                        and not args.get("attachments") and this
+                        and re.search(r"\b(?:e-?mail|send|mail|forward)\s+(?:this|that|it)\b",
+                                      user_content, re.I)
+                        and (shown := re.search(r"Open document: (/.+?)\s{2}", this + "  "))):
+                    # "Email this" while looking at a document: that document.
+                    args = {**args, "attachments": [shown.group(1)]}
                 if not attach_checked and (what := _missing_attachment(user_content, name, args,
                                                                        tool_events)):
                     attach_checked = True
@@ -923,6 +968,8 @@ async def run_chat(conversation_id: str, user_content: str,
                                                             asked=user_content):
                     yield event
                 model_output = out["output"]
+                if name.startswith(_MAKES_FILE) and (made := _MADE_PATH.search(model_output)):
+                    made_files.append(made.group(1))
                 if _failed(model_output):
                     model_output += FAILED_NOTE
                 if name == "research":
@@ -1028,7 +1075,7 @@ async def _run_quick(conversation_id: str, user_content: str, action: quick.Quic
     out: dict = {}
     denied = False
     async for event in _execute_with_permission(action.tool, action.arguments,
-                                                tool_events, out):
+                                                tool_events, out, asked=user_content):
         denied = denied or bool(event.get("denied"))
         yield event
     reply = "Okay, I won't." if denied else quick.reply_for(action, out["output"])
@@ -1200,8 +1247,16 @@ async def _plan_summary(goal: str, steps: list[str], results: list[str]) -> str:
     return text.strip()
 
 
-_ASKED_TO_SEND = re.compile(r"\bsend\b", re.I)
+_ASKED_TO_SEND = re.compile(r"\b(?:send|text)\b", re.I)
 _DOC_TOOLS = ("create_word_document", "create_presentation")
+_MADE_PATH = re.compile(r" at (/\S.*?\.(?:docx|xlsx|pptx|pdf|md|txt|csv))\b")
+
+
+def _exists(path) -> bool:
+    try:
+        return bool(path) and os.path.exists(os.path.expanduser(str(path)))
+    except (OSError, ValueError):
+        return False
 # "Email my CV to Sam" sent without the CV: an email the user asked to carry a
 # file must carry one.
 _NAMED_FILE = re.compile(
@@ -1269,10 +1324,10 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
         denied, denied_label = True, "Not allowed in routines"
         output = (f"'{name}' controls the screen, which routines never do. Say what the "
                   "user should do instead.")
-    elif (name == "send_file" and channel is not None and _ASKED_TO_SEND.search(asked)
+    elif (name in ("send_file", "send_to_phone") and _ASKED_TO_SEND.search(asked)
           and not getattr(channel, "auto_approve", False)):
-        # They asked for it from the very phone it goes to: asking again on
-        # that phone protects nothing. (A send they didn't ask for still asks.)
+        # They asked for it to be sent to them, and it can only go to their own
+        # phone: asking again protects nothing. (An unasked send still asks.)
         yield {"type": "tool_start", "name": name, "arguments": args}
         output = await tools.execute(name, args)
     elif t.needs_confirmation() and getattr(channel, "auto_approve", False):
