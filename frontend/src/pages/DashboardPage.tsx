@@ -89,7 +89,7 @@ export function DashboardPage(props: {
         </div>
         {(props.lastUser || props.busy) && (
           <div className="terminal" ref={termRef}>
-            {props.lastUser && <div className="cmd">&gt; {props.lastUser}</div>}
+            {props.lastUser && <div className="cmd" dir="auto">&gt; {props.lastUser}</div>}
             {props.chips.map((c, i) => (
               <div key={i} className="tool" style={c.status === "pending" ? { opacity: 0.5 } : undefined}>
                 [{c.status === "running" ? "…" : c.status === "denied" ? "denied"
@@ -97,7 +97,7 @@ export function DashboardPage(props: {
               </div>
             ))}
             {props.reply ? (
-              <div className={`reply ${props.busy ? "cursor" : ""}`}>
+              <div className={`reply ${props.busy ? "cursor" : ""}`} dir="auto">
                 {props.reply.replace(/```listing\n([\s\S]*?)(?:```|$)/g, "$1")}
               </div>
             ) : (

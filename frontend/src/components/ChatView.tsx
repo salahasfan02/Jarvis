@@ -163,7 +163,7 @@ export function ChatView(props: {
     <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
       <div className="chat-inner">
         {props.messages.map((m, i) => (
-          <div key={m.id} className={`msg ${m.role}`}>
+          <div key={m.id} className={`msg ${m.role}`} dir="auto">
             {m.meta?.tools?.map((t, j) => (
               <span key={j} className="chip"><Wrench className="icon-sm" /> {t.name}</span>
             ))}
@@ -182,7 +182,7 @@ export function ChatView(props: {
         ))}
 
         {(props.streaming !== null || props.chips.length > 0) && (
-          <div className="msg assistant">
+          <div className="msg assistant" dir="auto">
             {props.agentName && <div className="msg-meta">{props.agentName}</div>}
             {props.chips.map((c, i) => (
               <span key={i} className={`chip ${c.status === "denied" ? "denied" : ""}`}

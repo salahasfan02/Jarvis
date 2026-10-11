@@ -10,7 +10,9 @@ no other code changes needed, and the Settings dropdown picks them up from
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -227,7 +229,31 @@ def list_engines() -> list[dict]:
              "reason": e.unavailable_reason()} for e in ENGINES.values()]
 
 
+_ARABIC = re.compile(r"[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]")
+
+
+def is_arabic(text: str) -> bool:
+    letters = [c for c in text if c.isalpha()]
+    return bool(letters) and sum(bool(_ARABIC.match(c)) for c in letters) / len(letters) > 0.4
+
+
+async def _say_wav(text: str, voice: str) -> bytes | None:
+    """macOS's own voices (e.g. Majed for Arabic, which Kokoro doesn't speak)."""
+    def run() -> bytes | None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "say.wav"
+            r = subprocess.run(["say", "-v", voice, "--file-format=WAVE",
+                                "--data-format=LEI16@22050", "-o", str(out), text],
+                               capture_output=True, timeout=60)
+            return out.read_bytes() if r.returncode == 0 and out.exists() else None
+    return await asyncio.to_thread(run)
+
+
 async def synthesize(text: str) -> bytes | None:
+    if is_arabic(text):
+        voice = settings.get("voice.arabic_voice", "Majed")
+        if wav := await _say_wav(text, voice):
+            return wav
     engine = ENGINES.get(settings.get("voice.tts_engine", "browser"))
     if engine is None:
         return None

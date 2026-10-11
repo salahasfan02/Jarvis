@@ -42,6 +42,7 @@ export interface VoiceOptions {
   onInterim: (text: string) => void;      // live partial text
   onWake: () => void;
   bargeIn?: boolean;                      // conversation mode: talking over Jarvis interrupts it
+  multilingual?: boolean;                 // commands may be in Arabic (or other languages)
   onStateChange: (state: "idle" | "listening" | "waiting-wake") => void;
   onPermissionDenied?: () => void;        // mic blocked — stop auto-restarting
 }
@@ -429,11 +430,12 @@ export class WhisperVoiceEngine {
     }
   }
 
-  private async transcribe(blob: Blob, hint = ""): Promise<string> {
+  private async transcribe(blob: Blob, hint = "", command = false): Promise<string> {
     let error = "";
     try {
       const { API } = await import("./api");
-      const res = await fetch(`${API}/stt/transcribe?hint=${encodeURIComponent(hint)}`, {
+      const res = await fetch(`${API}/stt/transcribe?hint=${encodeURIComponent(hint)}`
+                              + (command ? "&command=1" : ""), {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: blob,
@@ -465,8 +467,19 @@ export class WhisperVoiceEngine {
         const command = mode === "ptt" || this.awaitingCommand;
         if (command) this.opts.onInterim("…");
         const hint = this.opts.wakeWords.map((w) => w[0]?.toUpperCase() + w.slice(1)).join(", ");
-        const text = (await this.transcribe(wav, hint)).trim();
+        // Commands go to the multilingual model when Arabic etc. is on; the
+        // wake word is listened for with the (faster, more accurate) English one.
+        let text = (await this.transcribe(wav, hint, command && !!this.opts.multilingual)).trim();
         if (gen !== this.generation) return;
+        if (!command && this.opts.multilingual && findWake(text, this.opts.wakeWords)?.command) {
+          // "Jarvis, <command>" in one breath: hear the command in any language.
+          const again = (await this.transcribe(wav, hint, true)).trim();
+          if (gen !== this.generation) return;
+          if (again) {
+            const m = findWake(again, this.opts.wakeWords);
+            text = m ? again : `jarvis ${again.split(/\s+/).slice(1).join(" ")}`;
+          }
+        }
         noteHeard(text, command || !!findWake(text, this.opts.wakeWords));
         if (!text && isSpeaking()) duckSpeech(false);
         if (mode === "ptt") this.finishPtt(text);

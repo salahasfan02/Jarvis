@@ -449,6 +449,7 @@ export default function App() {
         language: settings.voice?.language ?? "en-US",
         wakeWords: settings.assistant?.wake_words ?? ["jarvis"],
         bargeIn: !!settings.voice?.conversation_mode,
+        multilingual: ((settings.voice as any)?.languages ?? ["en"]).length > 1,
       });
     }
   }, [voice, settings]);

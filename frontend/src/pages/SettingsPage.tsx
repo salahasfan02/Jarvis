@@ -629,6 +629,14 @@ export function SettingsPage(props: {
               <option value="browser">Browser (Chrome, online)</option>
             </select>
           </Row>
+          <Row label="Also understand Arabic"
+               sub="Commands can be in Arabic as well as English (Jarvis answers in the language you use, with macOS's Arabic voice). Listening for “Jarvis” stays on the English model. Downloads a 480 MB speech model the first time.">
+            <Toggle checked={((s.voice as any).languages ?? ["en"]).includes("ar")}
+                    onChange={(v) => {
+                      props.onPatch({ voice: { languages: v ? ["en", "ar"] : ["en"] } } as any);
+                      if (v) fetch(`${API}/setup/fix/whisper_multi`, { method: "POST" });
+                    }} />
+          </Row>
           {(s.voice.stt_engine ?? "whisper") === "whisper" && (
             <Row label="Whisper model"
                  sub={sttStatus?.available

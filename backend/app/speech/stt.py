@@ -52,20 +52,25 @@ def status() -> dict:
     }
 
 
+_models: dict = {}
+
+
 def _load(size: str):
-    """Load (and if needed download) the model. Blocking; call in a thread."""
+    """Load (and if needed download) a model; kept loaded (the English wake
+    model and the multilingual command model are used side by side).
+    Blocking; call in a thread."""
     global _model, _model_size
     with _lock:
-        if _model is None or _model_size != size:
+        if size not in _models:
             from faster_whisper import WhisperModel
             # ~2/3 of the cores was fastest on Apple Silicon (all cores
             # fight the efficiency cores and the LLM: 0.7 s vs 1.8 s per clip).
             import os
             threads = max(4, min(8, (os.cpu_count() or 4) * 2 // 3))
-            _model = WhisperModel(size, device="cpu", compute_type="int8",
-                                  cpu_threads=threads, download_root=str(MODELS_DIR))
-            _model_size = size
-        return _model
+            _models[size] = WhisperModel(size, device="cpu", compute_type="int8",
+                                         cpu_threads=threads, download_root=str(MODELS_DIR))
+        _model, _model_size = _models[size], size
+        return _models[size]
 
 
 async def download(size: str):
@@ -119,11 +124,22 @@ def _phantom(seg) -> bool:
     return seg.avg_logprob < -1.2 and seg.no_speech_prob > 0.4
 
 
-async def transcribe(audio: bytes, hint: str = "") -> dict:
+def multilingual_enabled() -> bool:
+    """The user speaks Arabic (or other languages) too."""
+    return len(settings.get("voice.languages", ["en"]) or ["en"]) > 1
+
+
+async def transcribe(audio: bytes, hint: str = "", command: bool = False) -> dict:
     """Transcribe an audio blob (webm/ogg/wav/m4a — PyAV decodes them all).
-    `hint`: words to expect, e.g. the wake words."""
+    `hint`: words to expect, e.g. the wake words. `command`: this is a command
+    (after the wake word): with more than one language enabled it goes to the
+    multilingual model with language detection. Listening for the wake word
+    stays on the English model — measured on noisy clips: 25/25 caught vs 20/25
+    for the multilingual model, at half the time."""
     size = configured_size()
     lang = (settings.get("voice.language", "en-US") or "en").split("-")[0].lower()
+    if command and multilingual_enabled() and model_present("small"):
+        size, lang = "small", "auto"
     if size.endswith(".en") and lang != "en" and model_present(size[:-3]):
         size = size[:-3]   # English-only model can't do other languages
     if not model_present(size):

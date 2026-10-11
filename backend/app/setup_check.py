@@ -214,6 +214,15 @@ def _voice() -> list[dict]:
     except Exception as e:
         out.append(_item("whisper", "Speech recognition", "understanding your voice", "unknown", str(e)))
     try:
+        from .speech import stt as _stt
+        if _stt.multilingual_enabled():
+            ok = _stt.model_present("small")
+            out.append(_item("whisper_multi", "Arabic speech recognition", "commands in Arabic",
+                             "ok" if ok else "missing", "" if ok else "Model not downloaded.",
+                             "" if ok else "whisper_multi", "Download"))
+    except Exception:
+        pass
+    try:
         from .speech import engines
         k = engines.ENGINES.get("kokoro")
         ok = bool(k and k.available())
@@ -308,6 +317,16 @@ async def fix(cid: str) -> dict:
         name = settings.get(cid.split(":", 1)[1], "")
         asyncio.get_running_loop().create_task(_pull(name))
         return {"result": f"Downloading {name} in the background — re-check in a few minutes."}
+    if cid == "whisper_multi":
+        from .speech import stt
+        if stt.model_present("small"):
+            return {"result": "The multilingual speech model is already here."}
+
+        async def download_multi():
+            async for _ in stt.download("small"):
+                pass
+        asyncio.get_running_loop().create_task(download_multi())
+        return {"result": "Downloading the multilingual speech model (480 MB) in the background."}
     if cid == "whisper":
         from .speech import stt
 

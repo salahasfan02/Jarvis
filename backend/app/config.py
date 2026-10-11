@@ -59,6 +59,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "kokoro_voice": "bm_george",    # human-sounding neural voice
         "stt_engine": "whisper",        # whisper (offline) | browser (Chrome only)
         "whisper_model": "small.en",    # small.en | tiny | base | small
+        "languages": ["en"],            # ["en", "ar"]: commands may be Arabic too
         "piper_voice_path": "",         # path to a .onnx piper voice model
         "language": "en-US",
     },

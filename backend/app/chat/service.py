@@ -76,6 +76,8 @@ def _static_system_prompt(agent: agents.Agent | None = None) -> str:
     persona = settings.get("assistant.persona", "").format(name=name)
     parts = [persona]
     parts.append(SMART_WINDOW_RULES)
+    parts.append("Always reply in the language the user used — if they write or speak "
+                 "Arabic, answer in Arabic; English, in English.")
     parts.append(
         "When a tool would help, call it instead of guessing. Some tool calls "
         "require the user's confirmation; if one is denied, respect that and "
@@ -388,6 +390,11 @@ async def assemble(conversation_id: str, conv: dict, agent: agents.Agent,
     Ollama keeps it cached; the agent's instructions, extra tools, history and
     context come after it. Also used to warm that opening up (prefetch)."""
     dyn = _dynamic_block(memories, ctx, this, agent.prompt)
+    from ..speech.engines import is_arabic
+    if is_arabic(user_content):
+        dyn += ("\n\nThe user wrote in ARABIC: write your whole reply in Arabic only (Arabic "
+                "script) — never switch to Chinese or English, except for names and "
+                "technical terms.")
     if spoken:
         dyn += ("\n\nThe user is TALKING to you and will HEAR the reply: answer in one to "
                 "three short spoken sentences — no lists, tables, headings, links or source "

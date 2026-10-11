@@ -856,12 +856,12 @@ async def stt_download(body: dict | None = None):
 
 
 @router.post("/stt/transcribe")
-async def stt_transcribe(request: Request, hint: str = ""):
+async def stt_transcribe(request: Request, hint: str = "", command: int = 0):
     from ..speech import stt
     audio = await request.body()
     if not audio:
         return {"error": "empty audio"}
-    return await stt.transcribe(audio, hint=hint[:200])
+    return await stt.transcribe(audio, hint=hint[:200], command=bool(command))
 
 
 # --- code studio ---------------------------------------------------------------

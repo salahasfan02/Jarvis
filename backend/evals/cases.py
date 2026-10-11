@@ -114,6 +114,13 @@ CASES = [
     {"say": "my phone number is 07700 900123", "tools": ["update_my_details"],
      "args": {"update_my_details": {"phone": "07700 ?900123"}}},
 
+    # --- Arabic ---------------------------------------------------------------------------------
+    {"say": "ذكرني بالاتصال بأمي الساعة السادسة مساء", "tools": ["create_reminder"],
+     "args": {"create_reminder": {"due": "18:00"}}, "reply": "[\u0600-\u06FF]{3,}"},
+    {"say": "ما هي عاصمة فرنسا؟", "no_tools": True, "reply": "باريس",
+     "reply_not": "[\u4e00-\u9fff]"},
+    {"say": "ما هو الطقس في دبي غدا؟", "tools": ["web_search"], "reply_not": "[\u4e00-\u9fff]"},
+
     # --- spoken: short answers you can listen to ------------------------------------------------
     {"say": "what's the latest AI news", "spoken": True, "tools": ["web_search"], "max_chars": 450},
     {"say": "explain how a heat pump works", "spoken": True, "no_tools": True, "max_chars": 450},
