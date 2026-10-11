@@ -51,3 +51,18 @@ def test_images_are_shrunk_before_the_vision_model():
     out = ocr.shrink_for_vision(src.read_bytes())
     assert out[:2] == b"\xff\xd8"              # JPEG now
     assert len(out) < src.stat().st_size
+
+
+def test_calendar_and_reminders_need_full_access(monkeypatch):
+    import sys
+    import types
+    status = {}
+    store = types.SimpleNamespace(authorizationStatusForEntityType_=lambda e: status[e])
+    monkeypatch.setitem(sys.modules, "EventKit", types.SimpleNamespace(
+        EKEventStore=store, EKEntityTypeEvent="event", EKEntityTypeReminder="reminder"))
+    for code, expected, fix in [(0, "ask", "prompt"), (2, "missing", "settings"),
+                                (3, "ok", ""), (4, "missing", "settings")]:
+        status.update(event=code, reminder=code)
+        for check in (setup_check._calendar(), setup_check._reminders()):
+            assert (check["status"], check["fix"]) == (expected, fix), (code, check)
+    assert "Full Access" in setup_check._reminders()["detail"]   # write-only can't read

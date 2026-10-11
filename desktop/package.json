@@ -32,7 +32,18 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Jarvis listens for its wake word and your voice commands.",
         "NSCameraUsageDescription": "Jarvis looks through the camera when you ask it to.",
-        "NSAppleEventsUsageDescription": "Jarvis controls apps like Mail, Calendar, Music and your browser when you ask it to."
+        "NSAppleEventsUsageDescription": "Jarvis controls apps like Mail, Calendar, Music and your browser when you ask it to.",
+        "NSCalendarsUsageDescription": "Jarvis reads and adds events when you ask, and reminds you before meetings.",
+        "NSCalendarsFullAccessUsageDescription": "Jarvis reads and adds events when you ask, and reminds you before meetings.",
+        "NSCalendarsWriteOnlyAccessUsageDescription": "Jarvis adds events to your calendar when you ask it to.",
+        "NSRemindersUsageDescription": "Jarvis adds and reads reminders when you ask it to.",
+        "NSRemindersFullAccessUsageDescription": "Jarvis adds and reads reminders when you ask it to.",
+        "NSContactsUsageDescription": "Jarvis looks up people's email addresses and numbers when you ask it to contact them.",
+        "NSDesktopFolderUsageDescription": "Jarvis finds, opens and tidies files on your Desktop when you ask it to.",
+        "NSDocumentsFolderUsageDescription": "Jarvis finds, opens and creates documents when you ask it to.",
+        "NSDownloadsFolderUsageDescription": "Jarvis finds and opens downloaded files when you ask it to.",
+        "NSRemovableVolumesUsageDescription": "Jarvis opens files on external drives when you ask it to.",
+        "NSNetworkVolumesUsageDescription": "Jarvis opens files on network drives when you ask it to."
       }
     }
   }

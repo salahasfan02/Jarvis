@@ -25,6 +25,7 @@ PANES = {
     "screen": "Privacy_ScreenCapture",
     "automation": "Privacy_Automation",
     "calendar": "Privacy_Calendars",
+    "reminders": "Privacy_Reminders",
     "full_disk": "Privacy_AllFiles",
     "camera": "Privacy_Camera",
     "microphone": "Privacy_Microphone",
@@ -178,20 +179,57 @@ def _screen(fresh: bool | None = None) -> dict:
                   "click, screen memory", ok, fresh, "Jarvis can't see the screen yet.")
 
 
-def _calendar() -> dict:
+_EVENTKIT = {  # entity -> the macOS 14+ "full access" request
+    "EKEntityTypeEvent": "requestFullAccessToEventsWithCompletion_",
+    "EKEntityTypeReminder": "requestFullAccessToRemindersWithCompletion_",
+}
+
+
+def _eventkit_check(cid: str, name: str, why: str, entity: str) -> dict:
     try:
         import EventKit
-        status = EventKit.EKEventStore.authorizationStatusForEntityType_(EventKit.EKEntityTypeEvent)
+        status = EventKit.EKEventStore.authorizationStatusForEntityType_(getattr(EventKit, entity))
     except Exception:
-        return _item("calendar", "Calendar", "your events, meeting reminders", "unknown",
-                     "EventKit unavailable")
-    ok = status in (3, 4)          # authorized / full access
-    denied = status in (1, 2)      # restricted / denied
-    return _item("calendar", "Calendar", "your events, meeting reminders",
-                 "ok" if ok else "missing" if denied else "ask",
-                 "" if ok else "Turned off in System Settings." if denied
-                 else "macOS hasn't asked yet.", "" if ok else "prompt" if not denied
-                 else "settings", "Ask now" if not denied else "Open Settings")
+        return _item(cid, name, why, "unknown", "EventKit unavailable")
+    if status == 3:                # full access (== the older "authorized")
+        return _item(cid, name, why, "ok")
+    if status == 4:                # write-only: can add, can't read
+        return _item(cid, name, why, "missing", "Jarvis can add but not read — choose Full Access.",
+                     "settings", "Open Settings")
+    if status in (1, 2):           # restricted / denied
+        return _item(cid, name, why, "missing", "Turned off in System Settings.",
+                     "settings", "Open Settings")
+    return _item(cid, name, why, "ask", "macOS hasn't asked yet.", "prompt", "Ask now")
+
+
+def _calendar() -> dict:
+    return _eventkit_check("calendar", "Calendar", "your events, meeting reminders",
+                           "EKEntityTypeEvent")
+
+
+def _reminders() -> dict:
+    return _eventkit_check("reminders", "Reminders", "“remind me to…” in the Reminders app",
+                           "EKEntityTypeReminder")
+
+
+def ask_eventkit(entity: str) -> bool:
+    """Show macOS's calendar/reminders prompt; True once allowed. macOS only
+    shows it (and lists Jarvis) when the app declares why it wants access."""
+    import threading
+    import EventKit
+    store = EventKit.EKEventStore.alloc().init()
+    done, granted = threading.Event(), [False]
+
+    def answered(ok, _error):
+        granted[0] = bool(ok)
+        done.set()
+
+    if hasattr(store, _EVENTKIT[entity]):
+        getattr(store, _EVENTKIT[entity])(answered)
+    else:
+        store.requestAccessToEntityType_completion_(getattr(EventKit, entity), answered)
+    done.wait(60)
+    return granted[0]
 
 
 def _full_disk() -> dict:
@@ -318,7 +356,8 @@ async def run_all() -> dict:
     checks = await _models()
     fresh = await asyncio.to_thread(_fresh_grants) or (None, None)
     system = await asyncio.to_thread(lambda: [_accessibility(fresh[0]), _screen(fresh[1]),
-                                              _calendar(), _full_disk(), *_automation()])
+                                              _calendar(), _reminders(), _full_disk(),
+                                              *_automation()])
     checks += system + await asyncio.to_thread(_voice) + [_phone()]
     problems = sum(c["status"] in ("missing", "ask", "restart") for c in checks)
     owner = await asyncio.to_thread(responsible_app)
@@ -344,16 +383,13 @@ async def fix(cid: str) -> dict:
         Quartz.CGRequestScreenCaptureAccess()
         open_pane("screen")
         return {"result": "Switch Jarvis on in Screen Recording. macOS may ask to reopen Jarvis."}
-    if cid == "calendar":
-        from .tools.builtin import calendars
-        import datetime
-        try:
-            now = datetime.datetime.now()
-            await asyncio.to_thread(calendars._eventkit_events, now, now)
-            return {"result": "Calendar access granted."}
-        except Exception:
-            open_pane("calendar")
-            return {"result": "Turn Jarvis on under Calendars."}
+    if cid in ("calendar", "reminders"):
+        entity = "EKEntityTypeEvent" if cid == "calendar" else "EKEntityTypeReminder"
+        if await asyncio.to_thread(ask_eventkit, entity):
+            return {"result": "Allowed."}
+        open_pane(cid)
+        where = "Calendars" if cid == "calendar" else "Reminders"
+        return {"result": f"Switch Jarvis on under {where} (choose Full Access if asked)."}
     if cid == "full_disk":
         open_pane("full_disk")
         return {"result": "Add Jarvis under Full Disk Access (only needed for iMessages)."}

@@ -21,7 +21,7 @@ const needsYou = (c: Check) => c.status === "missing" || c.status === "ask" || c
 const GROUPS: [string, (c: Check) => boolean][] = [
   ["Essentials", (c) => ["ollama", "accessibility", "screen", "whisper", "camera", "microphone"].includes(c.id)
                         || c.id.startsWith("model:")],
-  ["Apps Jarvis controls", (c) => c.id.startsWith("automation:") || c.id === "calendar"],
+  ["Apps Jarvis controls", (c) => c.id.startsWith("automation:") || ["calendar", "reminders"].includes(c.id)],
   ["Optional", () => true],
 ];
 
