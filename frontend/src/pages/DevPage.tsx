@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
 import { Check, Timer, X } from "lucide-react";
-import { api } from "../lib/api";
+import { API, api } from "../lib/api";
 
 export function DevPage() {
-  const [tab, setTab] = useState<"audit" | "tools" | "agents" | "plugins">("audit");
+  const [tab, setTab] = useState<"audit" | "learned" | "tools" | "agents" | "plugins">("audit");
+  const [learned, setLearned] = useState<{ candidates: any[]; saved: number }>({ candidates: [], saved: 0 });
+  const [expected, setExpected] = useState<Record<string, string>>({});
+  const loadLearned = () => fetch(`${API}/learned`).then((r) => r.json()).then(setLearned).catch(() => {});
+  const resolve = async (id: string, body: object) => {
+    await fetch(`${API}/learned/${id}`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify(body) });
+    loadLearned();
+  };
   const [audit, setAudit] = useState<any[]>([]);
   const [tools, setTools] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
@@ -14,6 +22,7 @@ export function DevPage() {
     api.tools().then(setTools).catch(() => {});
     api.agents().then(setAgents).catch(() => {});
     api.plugins().then(setPlugins).catch(() => {});
+    loadLearned();
   };
   useEffect(() => {
     refresh();
@@ -26,7 +35,7 @@ export function DevPage() {
       <div className="page-inner">
         <h1>Developer</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          {(["audit", "tools", "agents", "plugins"] as const).map((t) => (
+          {(["audit", "learned", "tools", "agents", "plugins"] as const).map((t) => (
             <button key={t} className={`btn ${tab === t ? "primary" : ""}`} onClick={() => setTab(t)}>
               {t}
             </button>
@@ -45,6 +54,38 @@ export function DevPage() {
               </div>
             ))}
             {audit.length === 0 && <div className="sub">No activity yet.</div>}
+          </div>
+        )}
+
+        {tab === "learned" && (
+          <div className="panel">
+            <h3>Learned from mistakes</h3>
+            <div className="sub" style={{ marginBottom: 10 }}>
+              Requests where Jarvis slipped (claimed results without looking, stalled, didn't make
+              the file) or you said “that's wrong”. Say which tool should have run and it becomes a
+              test case for <code>python -m evals.run</code> ({learned.saved} saved so far).
+            </div>
+            <datalist id="tool-names">{tools.map((x) => <option key={x.name} value={x.name} />)}</datalist>
+            {learned.candidates.map((c) => (
+              <div key={c.id} className="audit-row" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div><b>“{c.say}”</b> <span className="sub">· {c.reason} · {c.agent}</span></div>
+                <div className="sub">
+                  did: {c.calls.length ? c.calls.map((x: any) => x.name).join(", ") : "no tools"} — {c.reply.slice(0, 160)}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input className="search" list="tool-names" style={{ flex: 1 }}
+                         placeholder="tool(s) that should run, comma-separated — empty = just answer"
+                         value={expected[c.id] ?? ""}
+                         onChange={(e) => setExpected({ ...expected, [c.id]: e.target.value })} />
+                  <button className="btn primary" onClick={() => resolve(c.id, {
+                    expected: (expected[c.id] ?? "").split(",").map((s) => s.trim()).filter(Boolean) })}>
+                    <Check /> Save test
+                  </button>
+                  <button className="btn" onClick={() => resolve(c.id, { dismiss: true })}><X /> Dismiss</button>
+                </div>
+              </div>
+            ))}
+            {learned.candidates.length === 0 && <div className="sub">Nothing to review — no slips caught yet.</div>}
           </div>
         )}
 

@@ -81,3 +81,18 @@ def test_trigger_is_inferred_when_the_model_leaves_it_out():
         "Landlord mail", email_from="my landlord")
     assert "15 minutes before" in routine_tools.create_routine("Meetings", minutes_before=15)
     assert "every day at 07:30" in routine_tools.create_routine("Wake", at="7:30am")
+
+
+def test_routines_page_api_creates_and_edits():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    client = TestClient(app, base_url="http://127.0.0.1:8765")   # trusted-host check
+    r = client.post("/api/routines", json={"trigger": "weekdays", "at": "7:45am",
+                                           "action": "give me my briefing", "deliver": "speak"}).json()
+    assert r["summary"] == "weekdays at 07:45" and r["name"] == "Give me my briefing"
+    bad = client.post("/api/routines", json={"trigger": "daily", "at": "whenever"}).json()
+    assert "need a time" in bad["error"]
+    edited = client.put(f"/api/routines/{r['id']}", json={"trigger": "calendar",
+                                                          "minutes_before": "15"}).json()
+    assert edited["summary"] == "15 minutes before each calendar event"
+    assert client.put(f"/api/routines/{r['id']}", json={"enabled": False}).json()["enabled"] is False

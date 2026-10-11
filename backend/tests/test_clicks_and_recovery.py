@@ -71,3 +71,20 @@ def test_relation_only_person_gets_their_name_later(monkeypatch):
     found = people.known("landlord")
     assert len(found) == 1 and found[0]["name"] == "Tom Reed"
     assert found[0]["email"] == "landlord@example.com" and found[0]["phone"] == "0700"
+
+
+def test_reply_tools_only_when_replying(monkeypatch):
+    import asyncio
+    from app.chat import toolpick
+    from app.llm import ollama_client
+    from app.tools.base import registry
+
+    async def embed(text):
+        return [1.0, 0.0]
+    monkeypatch.setattr(ollama_client, "embed", embed)
+    offered = [registry.get(n) for n in ("send_reply", "draft_reply", "find_person", "search_emails")]
+    names = lambda text, recent=None: {t.name for t in asyncio.run(
+        toolpick.select(text, offered, recent))}
+    assert "send_reply" not in names("email my landlord that the boiler is broken")
+    assert "send_reply" in names("reply to Sam's email saying thanks")
+    assert "draft_reply" in names("say yes to the second one", {"read_emails"})

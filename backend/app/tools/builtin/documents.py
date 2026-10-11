@@ -221,6 +221,8 @@ def markdown_to_docx(title: str, markdown: str, path: Path) -> int:
 def create_word_document(title: str, content: str, filename: str = "") -> str:
     path = _unique_path(DOCS_DIR, _slug(filename or title))
     words = markdown_to_docx(title.strip() or "Document", content, path)
+    from ... import activity
+    activity.offer_undo(kind="remove_created", path=str(path))
     return (f"Created Word document '{title}' ({words} words) at {path}. "
             "If the user wants it on their phone, call send_file with this path.")
 

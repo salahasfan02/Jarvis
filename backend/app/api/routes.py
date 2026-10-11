@@ -543,6 +543,38 @@ def telegram_unpair(user_id: int):
 
 # --- screen activity frame -------------------------------------------------------
 
+# --- activity log & undo --------------------------------------------------------------
+
+@router.get("/activity")
+async def activity_list(limit: int = 150):
+    from .. import activity
+    return activity.recent(limit)
+
+
+@router.post("/activity/{aid}/undo")
+async def activity_undo(aid: str):
+    from .. import activity
+    return {"result": activity.undo(aid)}
+
+
+# --- learned test cases ----------------------------------------------------------------
+
+@router.get("/learned")
+async def learned_list():
+    from .. import learned
+    return {"candidates": learned.candidates(), "saved": len(learned.saved_cases())}
+
+
+@router.post("/learned/{cid}")
+async def learned_resolve(cid: str, body: dict):
+    """{"expected": ["tool", ...]} to save as a test ([] = no tools), {"dismiss": true} to drop."""
+    from .. import learned
+    if body.get("dismiss"):
+        return learned.resolve(cid, None)
+    expected = [t.strip() for t in body.get("expected", []) if t and t.strip()]
+    return learned.resolve(cid, expected)
+
+
 # --- routines & triggers ------------------------------------------------------------
 
 @router.get("/routines")
@@ -551,12 +583,49 @@ async def routines_list():
     return [{k: v for k, v in r.items() if k != "state"} for r in routines.all_routines()]
 
 
+_TRIGGER_FIELDS = ("trigger", "at", "days", "every_minutes", "email_from", "email_subject",
+                   "minutes_before")
+
+
+def _trigger_from(body: dict):
+    from ..tools.builtin.routine_tools import build_trigger
+    args = {k: body[k] for k in _TRIGGER_FIELDS if body.get(k) not in (None, "")}
+    for k in ("every_minutes", "minutes_before"):
+        if k in args:
+            args[k] = int(args[k])
+    return build_trigger(**args)
+
+
+@router.post("/routines")
+async def routines_create(body: dict):
+    from .. import routines
+    spec, error = _trigger_from(body)
+    if spec is None:
+        return {"error": error}
+    action = (body.get("action") or "").strip()
+    name = (body.get("name") or "").strip() or (action[:40] or "Routine").capitalize()
+    return routines.add(name, spec, action, body.get("deliver") or "auto")
+
+
 @router.put("/routines/{rid}")
 async def routines_update(rid: str, body: dict):
+    """Pause/resume ({enabled}) or edit (name, action, deliver, trigger fields)."""
     from .. import routines
+    fields: dict = {}
     if "enabled" in body:
-        routines.update(rid, enabled=bool(body["enabled"]))
-    return {"ok": True}
+        fields["enabled"] = bool(body["enabled"])
+    for k in ("name", "action", "deliver"):
+        if k in body:
+            fields[k] = (body[k] or "").strip() or ("auto" if k == "deliver" else "")
+    if any(k in body for k in _TRIGGER_FIELDS):
+        spec, error = _trigger_from(body)
+        if spec is None:
+            return {"error": error}
+        fields["trigger"] = spec
+        fields["state"] = {}          # a new trigger starts fresh
+    if fields:
+        routines.update(rid, **fields)
+    return routines.get(rid) or {"error": "no such routine"}
 
 
 @router.delete("/routines/{rid}")
@@ -834,9 +903,9 @@ async def ws_chat(ws: WebSocket):
     await ws.accept()
     current_task: asyncio.Task | None = None
 
-    async def run(conv_id: str, content: str):
+    async def run(conv_id: str, content: str, spoken: bool = False):
         try:
-            async for event in chat_service.run_chat(conv_id, content):
+            async for event in chat_service.run_chat(conv_id, content, spoken=spoken):
                 await ws.send_json(event)
         except WebSocketDisconnect:
             pass
@@ -860,7 +929,8 @@ async def ws_chat(ws: WebSocket):
                            or db.create_conversation(
                                mode=msg.get("mode", "chat"))["id"])
                 await ws.send_json({"type": "conversation", "conversation_id": conv_id})
-                current_task = asyncio.create_task(run(conv_id, msg.get("content", "")))
+                current_task = asyncio.create_task(
+                    run(conv_id, msg.get("content", ""), bool(msg.get("voice"))))
                 ui_bridge.track(current_task)
 
             elif mtype == "confirm":

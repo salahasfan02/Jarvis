@@ -694,6 +694,22 @@ export function SettingsPage(props: {
         </div>
 
         <div className="panel">
+          <h3>Off-limits for screen control</h3>
+          <Row label="Apps" sub="Jarvis never presses, types or clicks in these (comma-separated)">
+            <textarea className="search" rows={2} style={{ width: 340 }}
+                      defaultValue={(s.control?.blocked_apps ?? []).join(", ")}
+                      onBlur={(e) => props.onPatch({ control: { blocked_apps:
+                        e.target.value.split(",").map((x) => x.trim()).filter(Boolean) } })} />
+          </Row>
+          <Row label="Websites" sub="…nor on pages whose address contains any of these words">
+            <textarea className="search" rows={2} style={{ width: 340 }}
+                      defaultValue={(s.control?.blocked_sites ?? []).join(", ")}
+                      onBlur={(e) => props.onPatch({ control: { blocked_sites:
+                        e.target.value.split(",").map((x) => x.trim()).filter(Boolean) } })} />
+          </Row>
+        </div>
+
+        <div className="panel">
           <h3>Tool permissions</h3>
           <Row label="Tools enabled" sub="Let the assistant use tools at all">
             <Toggle checked={s.tools.enabled}

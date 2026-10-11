@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from ... import activity
 from ..base import tool
 from .documents import find_file
 
@@ -142,6 +143,10 @@ def read_file(path: str) -> str:
 def write_file(path: str, content: str) -> str:
     p = _expand(path)
     p.parent.mkdir(parents=True, exist_ok=True)
+    if p.is_file():
+        activity.offer_undo(kind="restore_backup", path=str(p), backup=activity.backup(p))
+    else:
+        activity.offer_undo(kind="remove_created", path=str(p))
     p.write_text(content)
     return f"Wrote {len(content)} characters to {p}"
 
@@ -158,6 +163,8 @@ def write_file(path: str, content: str) -> str:
 )
 def create_folder(path: str) -> str:
     p = _expand(path)
+    if not p.exists():
+        activity.offer_undo(kind="remove_folder", path=str(p))
     p.mkdir(parents=True, exist_ok=True)
     return f"Created folder {p}"
 
@@ -178,7 +185,9 @@ def move_file(source: str, destination: str) -> str:
     if not src.exists():
         return f"Source does not exist: {src}"
     dst.parent.mkdir(parents=True, exist_ok=True)
+    final = dst / src.name if dst.is_dir() else dst
     shutil.move(str(src), str(dst))
+    activity.offer_undo(kind="move_back", now=str(final), was=str(src))
     return f"Moved {src} -> {dst}"
 
 
@@ -202,6 +211,7 @@ def trash_file(path: str) -> str:
                             capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
         return f"Failed to trash: {result.stderr.strip()}"
+    activity.offer_undo(kind="restore_from_trash", was=str(p))
     return f"Moved {p} to Trash"
 
 

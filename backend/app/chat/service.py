@@ -22,10 +22,10 @@ import re
 import time
 from typing import AsyncIterator
 
-from .. import channels, db
+from .. import activity, channels, db, learned
 from ..agents import registry as agents
 from ..automation import context as app_context
-from ..automation import selection
+from ..automation import guard, selection
 from ..config import settings
 from ..gaps import registry as gaps
 from ..llm import ollama_client
@@ -33,7 +33,7 @@ from ..memory import store as memory_store
 from ..security import audit
 from ..security.permissions import confirmations
 from ..tools import base as tools
-from . import prefetch, quick, toolpick
+from . import compact, prefetch, quick, toolpick
 
 SMART_WINDOW_RULES = """Smart context rules (IMPORTANT):
 - Before opening any website, check the open tabs (they are listed above, or
@@ -254,7 +254,7 @@ _ASKS_ACTION = re.compile(
     r"delete|book|remind|text|find|search|list|show|what tabs)\b", re.I)
 # Citing searches it never ran: never acceptable, whatever was asked.
 _FAKE_SOURCES = re.compile(r"\baccording to (?:recent |my |the )?(?:web )?search(?:es)?\b"
-                           r"|^\s*sources?:", re.I | re.M)
+                           r"|(?:^|[.!?]\s+)sources?:\s", re.I | re.M)
 _ASKS_ABOUT_PAST = re.compile(r"^\s*(did|have|has|was|were|is|are|why|when)\b", re.I)
 CLAIM_NUDGE = ("(You answered as if you had done or looked something up, but you didn't "
                "call any tool — so nothing happened and anything you 'found' is made up. "
@@ -379,12 +379,19 @@ _THIS_TOOLS = ("read_document", "browser_read_page", "screen_read", "open_file")
 async def assemble(conversation_id: str, conv: dict, agent: agents.Agent,
                    history: list[dict], user_content: str, memories: list[dict], ctx: dict,
                    keep: int = toolpick.KEEP,
-                   this: str = "") -> tuple[list[dict], list[tools.Tool]]:
+                   this: str = "", spoken: bool = False) -> tuple[list[dict], list[tools.Tool]]:
     """The model's messages and tools for a turn. The opening — base system
     prompt, then the core tools — is the same for every request and agent, so
     Ollama keeps it cached; the agent's instructions, extra tools, history and
     context come after it. Also used to warm that opening up (prefetch)."""
     dyn = _dynamic_block(memories, ctx, this, agent.prompt)
+    if spoken:
+        dyn += ("\n\nThe user is TALKING to you and will HEAR the reply: answer in one to "
+                "three short spoken sentences — no lists, tables, headings, links or source "
+                "lists (still look things up with your tools first when the answer needs "
+                "current facts). If there's more worth knowing, end with a short offer like "
+                "\"Want the details?\"")
+    history = compact.fit(conv, history)   # long conversations: summary + recent turns
     llm_messages: list[dict] = [
         {"role": "system", "content": _static_system_prompt()},
         *_with_context(_history_to_llm(history), dyn),
@@ -428,7 +435,8 @@ async def assemble(conversation_id: str, conv: dict, agent: agents.Agent,
     return llm_messages, toolpick.arrange(picked)
 
 
-async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dict]:
+async def run_chat(conversation_id: str, user_content: str,
+                   spoken: bool = False) -> AsyncIterator[dict]:
     started = time.perf_counter()
     db.add_message(conversation_id, "user", user_content)
     history = db.get_messages(conversation_id)
@@ -481,7 +489,8 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
         except Exception:
             this = ""
     llm_messages, tool_list = await assemble(conversation_id, conv, agent, history,
-                                             user_content, memories, ctx, this=this)
+                                             user_content, memories, ctx, this=this,
+                                             spoken=spoken)
     tool_schemas = [t.to_ollama() for t in tool_list] or None
 
     full_response = ""
@@ -492,6 +501,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
     nudged = False
     claim_checked = False
     intent_nudged = False
+    mistakes: list[str] = []      # what went wrong this turn (-> learned test cases)
 
     try:
         round_no = 0
@@ -520,6 +530,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
             if not tool_calls and schemas:
                 recovered = text_tool_call(round_text, tool_list)
                 if recovered:
+                    mistakes.append("wrote a tool call as text")
                     audit.log("text_tool_call_recovered",
                               tool=recovered["function"]["name"], text=round_text[:200])
                     full_response = full_response[:len(full_response) - len(round_text)]
@@ -533,6 +544,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                     # "I've drafted the email" with no tool call: nothing happened.
                     # Drop the false claim and make the model act or admit it can't.
                     claim_checked = True
+                    mistakes.append("claimed results without a tool")
                     audit.log("claimed_without_tool", agent=agent.id, reply=full_response[:200])
                     llm_messages.append({"role": "assistant", "content": round_text})
                     llm_messages.append({"role": "user", "content": CLAIM_NUDGE})
@@ -543,6 +555,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                     # "Write a report as a Word document" answered with the
                     # report as chat text: the file was the point.
                     intent_nudged = True
+                    mistakes.append("didn't create the requested file")
                     llm_messages.append({"role": "assistant", "content": round_text})
                     llm_messages.append({"role": "user", "content": FILE_NUDGE})
                     full_response = full_response[:len(full_response) - len(round_text)]
@@ -553,6 +566,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                         and not any(re.search(r"ask (?:the user )?which|several", e["result"], re.I)
                                     for e in tool_events)):
                     intent_nudged = True
+                    mistakes.append("asked instead of acting")
                     audit.log("stall_nudged", agent=agent.id, reply=round_text[:200])
                     llm_messages.append({"role": "assistant", "content": round_text})
                     llm_messages.append({"role": "user", "content": STALL_NUDGE})
@@ -564,6 +578,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                     # "Let me find your CV files now." — and then nothing. Hold
                     # it to what it just said it would do.
                     intent_nudged = True
+                    mistakes.append("announced an action without taking it")
                     llm_messages.append({"role": "assistant", "content": round_text})
                     llm_messages.append({"role": "user", "content": INTENT_NUDGE})
                     continue
@@ -624,6 +639,14 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
     yield {"type": "done", "content": full_response, "message_id": saved["id"],
            "timing": timing}
 
+    # Long conversation? Fold older turns into a summary before the next one.
+    compact.schedule(conversation_id)
+    # Learn from mistakes (or "that's wrong"): keep the request as a test case.
+    try:
+        learned.note_turn(conversation_id, user_content, agent.id, tool_events,
+                          full_response, mistakes)
+    except Exception:
+        pass
     # Self-improvement: analyze this turn for capability gaps (non-blocking).
     gaps.schedule_analysis(user_content, full_response, tool_events)
     # Auto-memory: quietly learn durable facts the user shared (toggleable).
@@ -634,7 +657,10 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
 
 
 async def _auto_title(conversation_id: str, user_content: str) -> AsyncIterator[dict]:
-    """Title new conversations from the first message."""
+    """Title new conversations from the first message — never ones created
+    with a name ("📱 Phone chat", "⏰ Routines")."""
+    if (db.get_conversation(conversation_id) or {}).get("title") != "New conversation":
+        return
     conv_msgs = db.get_messages(conversation_id)
     if len([m for m in conv_msgs if m["role"] == "user"]) != 1:
         return
@@ -834,6 +860,7 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
     denied = False
     denied_label = "Denied by user"
     channel = channels.current.get()
+    undo_slot, undo_token = activity.begin()   # tools leave their undo recipe here
 
     if t is None:
         output = f"Error: unknown tool '{name}'"
@@ -845,6 +872,11 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
                   "(they can allow dangerous tools under Settings → Phone on the "
                   "Mac). Tell them it needs to be done at the Mac.")
         audit.log("tool_blocked_remote", tool=name, channel=channel.name)
+    elif getattr(channel, "auto_approve", False) and name in guard.CONTROL_TOOLS:
+        # Nobody is watching a routine: it never takes over the screen.
+        denied, denied_label = True, "Not allowed in routines"
+        output = (f"'{name}' controls the screen, which routines never do. Say what the "
+                  "user should do instead.")
     elif t.needs_confirmation() and getattr(channel, "auto_approve", False):
         # A routine the user set up: nobody is there to ask. Confirm-level
         # tools (read mail, calendar, screen…) run; anything that always needs
@@ -875,4 +907,9 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
     yield {"type": "tool_result", "name": name,
            "result": denied_label if denied else output[:1000], "denied": denied}
     tool_events.append({"name": name, "arguments": args, "result": output[:2000]})
+    if not denied:
+        source = channel.name if channel is not None else "app"
+        activity.record(name, args, output, source,
+                        None if _failed(output) else undo_slot.get("undo"))
+    activity.end(undo_token)
     out["output"] = output

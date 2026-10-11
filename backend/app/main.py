@@ -18,7 +18,7 @@ from .plugins import loader as plugin_loader
 # Importing the builtin tool modules registers their tools.
 from .tools.builtin import (  # noqa: F401
     browser, calendars, control, documents, filesystem, imessage, macos, mail, music,
-    office, people, routine_tools, screen_click, system, web)
+    office, people, routine_tools, screen_click, shortcuts, system, web)
 
 
 @asynccontextmanager

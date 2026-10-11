@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 REAL_SETTINGS = Path.home() / ".jarvis" / "settings.json"
+LEARNED = Path.home() / ".jarvis" / "evals" / "learned.json"   # saved from real mistakes
 
 # Jarvis keeps everything under ~/.jarvis: point it at a throwaway home first.
 _home = tempfile.mkdtemp(prefix="jarvis-eval-")
@@ -174,6 +175,8 @@ def score(case: dict, calls: list[tuple[str, dict]], reply: str) -> list[str]:
         problems.append(f"reply !~ /{case['reply']}/: {reply[:120]!r}")
     if case.get("reply_not") and re.search(case["reply_not"], reply):
         problems.append(f"reply claims success: {reply[:120]!r}")
+    if case.get("max_chars") and len(reply) > case["max_chars"]:
+        problems.append(f"spoken reply too long: {len(reply)} chars > {case['max_chars']}")
     if re.search(r'\{\s*"(name|function)"\s*:', reply):
         problems.append("tool call leaked into the reply as text")
     return problems
@@ -210,7 +213,7 @@ async def run_case(case: dict, verbose: bool) -> dict:
     first_token = None
     reply, agent, timing = "", "?", {}
     try:
-        async for ev in service.run_chat(conv, case["say"]):
+        async for ev in service.run_chat(conv, case["say"], spoken=bool(case.get("spoken"))):
             if ev["type"] == "token" and first_token is None:
                 first_token = time.perf_counter() - started
             elif ev["type"] == "agent":
@@ -289,6 +292,11 @@ async def main() -> None:
     setup(a.model, a.utility)
     from app.config import settings
     from evals.cases import CASES
+    if LEARNED.exists():
+        try:
+            CASES = CASES + json.loads(LEARNED.read_text())
+        except ValueError:
+            pass
 
     picks = [s.strip().lower() for s in (a.only or "").split("|") if s.strip()]
     cases = [c for c in CASES if not picks or any(s in c["say"].lower() for s in picks)]

@@ -24,6 +24,53 @@ def _hhmm(text: str) -> str | None:
     return f"{h:02d}:{mins:02d}" if h < 24 and mins < 60 else None
 
 
+def build_trigger(trigger: str = "", at: str = "", days: list | None = None,
+                  every_minutes: int = 0, email_from: str = "", email_subject: str = "",
+                  minutes_before: int = 0) -> tuple[dict | None, str]:
+    """(trigger spec, "") or (None, what's wrong) — shared with the Routines page."""
+    if not trigger:   # infer it from what was given
+        trigger = ("email" if email_from or email_subject else
+                   "calendar" if minutes_before else
+                   "every" if every_minutes else
+                   "once" if re.search(r"\d{4}-\d{2}-\d{2}", at or "") else
+                   "days" if days else "daily" if at else "")
+        if not trigger:
+            return None, "When should it run? (a time, every N minutes, an email, or before meetings)"
+    if trigger in ("daily", "weekdays", "weekends", "days"):
+        time = _hhmm(at)
+        if not time:
+            return None, f"I need a time like 08:00 or 6pm for that routine (got '{at}')."
+        chosen = {"daily": routines.DAYS, "weekdays": routines.DAYS[:5],
+                  "weekends": routines.DAYS[5:]}.get(trigger)
+        if chosen is None:
+            chosen = [_DAY_ALIASES.get(d.lower(), d.lower()[:3]) for d in (days or [])]
+            chosen = [d for d in routines.DAYS if d in chosen]
+            if not chosen:
+                return None, "Which days? (mon, tue, …)"
+        spec = {"type": "time", "at": time, "days": chosen}
+    elif trigger == "every":
+        if every_minutes < 5:
+            return None, "Routines can repeat at most every 5 minutes."
+        spec = {"type": "interval", "minutes": every_minutes}
+    elif trigger == "once":
+        try:
+            when = datetime.datetime.fromisoformat(at.strip().replace(" ", "T"))
+        except ValueError:
+            return None, f"I need a date and time like 2026-10-12 15:00 (got '{at}')."
+        if when < datetime.datetime.now():
+            return None, f"{when:%d %b %H:%M} is in the past."
+        spec = {"type": "once", "at": when.isoformat(timespec="minutes")}
+    elif trigger == "email":
+        if not (email_from or email_subject):
+            return None, "Whose emails (or which subject) should I watch for?"
+        spec = {"type": "email", "from": email_from.strip(), "subject": email_subject.strip()}
+    elif trigger == "calendar":
+        spec = {"type": "calendar", "minutes_before": max(1, min(int(minutes_before or 10), 240))}
+    else:
+        return None, f"Unknown trigger '{trigger}'."
+    return spec, ""
+
+
 @tool(
     name="create_routine",
     description="Set up something Jarvis does automatically, without being asked: on a "
@@ -59,47 +106,13 @@ def create_routine(name: str = "", trigger: str = "", at: str = "", days: list |
                    every_minutes: int = 0, email_from: str = "", email_subject: str = "",
                    minutes_before: int = 0, action: str = "", deliver: str = "auto") -> str:
     name = name.strip() or (action.strip()[:40] or "Routine").capitalize()
-    if not trigger:   # infer it from what was given
-        trigger = ("email" if email_from or email_subject else
-                   "calendar" if minutes_before else
-                   "every" if every_minutes else
-                   "once" if re.search(r"\d{4}-\d{2}-\d{2}", at or "") else
-                   "days" if days else "daily" if at else "")
-        if not trigger:
-            return "When should it run? (a time, every N minutes, an email, or before meetings)"
-    if trigger in ("daily", "weekdays", "weekends", "days"):
-        time = _hhmm(at)
-        if not time:
-            return f"I need a time like 08:00 or 6pm for that routine (got '{at}')."
-        chosen = {"daily": routines.DAYS, "weekdays": routines.DAYS[:5],
-                  "weekends": routines.DAYS[5:]}.get(trigger)
-        if chosen is None:
-            chosen = [_DAY_ALIASES.get(d.lower(), d.lower()[:3]) for d in (days or [])]
-            chosen = [d for d in routines.DAYS if d in chosen]
-            if not chosen:
-                return "Which days? (mon, tue, …)"
-        spec = {"type": "time", "at": time, "days": chosen}
-    elif trigger == "every":
-        if every_minutes < 5:
-            return "Routines can repeat at most every 5 minutes."
-        spec = {"type": "interval", "minutes": every_minutes}
-    elif trigger == "once":
-        try:
-            when = datetime.datetime.fromisoformat(at.strip().replace(" ", "T"))
-        except ValueError:
-            return f"I need a date and time like 2026-10-12 15:00 (got '{at}')."
-        if when < datetime.datetime.now():
-            return f"{when:%d %b %H:%M} is in the past."
-        spec = {"type": "once", "at": when.isoformat(timespec="minutes")}
-    elif trigger == "email":
-        if not (email_from or email_subject):
-            return "Whose emails (or which subject) should I watch for?"
-        spec = {"type": "email", "from": email_from.strip(), "subject": email_subject.strip()}
-    elif trigger == "calendar":
-        spec = {"type": "calendar", "minutes_before": max(1, min(int(minutes_before or 10), 240))}
-    else:
-        return f"Unknown trigger '{trigger}'."
+    spec, error = build_trigger(trigger, at, days, every_minutes, email_from, email_subject,
+                                minutes_before)
+    if spec is None:
+        return error
     r = routines.add(name, spec, action, deliver)
+    from ... import activity
+    activity.offer_undo(kind="delete_routine", id=r["id"])
     what = f" → {action}" if action else ""
     return f"Routine “{r['name']}” set: {r['summary']}{what} (delivered: {deliver})."
 

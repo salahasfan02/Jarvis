@@ -71,7 +71,8 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 ### 🎙️ Voice
 - Wake word (*"Jarvis…"*) with an audible chime — robust to room noise, no phantom wakes
 - **Offline speech recognition** (Whisper `small.en`) — works in any browser
-- Say *"stop"* any time to halt what it's doing
+- Say *"stop"* any time to halt what it's doing · **talk over it** — it lowers its voice at once, and *"Jarvis…"* (or, in conversation mode, any reply) interrupts
+- **Short spoken answers** — a couple of sentences when you're talking, with *"Want the details?"*
 - **Human-sounding neural voices** (Kokoro TTS)
 - Sentence-streaming replies (talks as it thinks)
 - Conversation mode — reply without repeating the wake word
@@ -84,7 +85,9 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Screen memory** — auto-journals what you're working on
 
 ### 🦾 Mac Automation
-- **Full control of any app** — presses buttons (even icon-only ones) by name through macOS Accessibility, fills in fields, types, keyboard shortcuts, scrolls and drags · **Esc** is the emergency stop
+- **Full control of any app** — presses buttons (even icon-only ones) by name through macOS Accessibility, fills in fields, types, keyboard shortcuts, scrolls and drags · **Esc** is the emergency stop · password managers, System Settings, terminals and banking sites are **off-limits** (editable)
+- **Shortcuts** — runs any of your macOS Shortcuts (HomeKit scenes, Focus modes…)
+- **Activity & undo** — every action logged; *"undo that"* moves files back, restores overwritten or trashed ones, removes what it created
 - Open apps and **files by name** (*"open my CV"*), control windows, notifications, clipboard
 - **Browser agent** — clicks links and buttons on any page, closes tabs by name, reuses your tabs
 - Play **YouTube** & **Apple Music**, manage playlists
@@ -119,7 +122,8 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Self-improving** — logs what it can't do and can write its own tools
 - **Multi-model** — assign models per task, benchmark them
 - **Fast by design** — only the tools a request needs go into the prompt, so even a 14B model answers quickly
-- **Built-in eval suite** — 50+ real requests replayed against fake tools to check every model change
+- **Built-in eval suite** — 60+ real requests replayed against fake tools to check every model change, and it **learns from real mistakes**: slips and *"that's wrong"* become new test cases
+- **Long conversations** — older turns are summarized in the background so nothing falls out of the model's memory
 - **Instant commands** — *"open YouTube"*, *"open Safari"*, *"pause"* run in well under a second, no model needed
 
 </td>

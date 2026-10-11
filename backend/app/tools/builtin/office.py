@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from ..base import tool
+from ... import activity
 from .documents import DOCS_DIR, find_file
 
 READ_LIMIT = 12000
@@ -190,6 +191,7 @@ def create_spreadsheet(title: str, rows: list | None = None, csv_text: str = "",
         ws.column_dimensions[get_column_letter(i)].width = min(max(10, width + 2), 60)
     path = _out_path(filename, title, ".xlsx")
     wb.save(path)
+    activity.offer_undo(kind="remove_created", path=str(path))
     return (f"Created spreadsheet '{title}' ({len(rows) - 1} rows) at {path}. To email it, "
             "attach this path; to send it to the phone, send_file it.")
 
@@ -233,6 +235,7 @@ def create_presentation(title: str, slides: list, subtitle: str = "", filename: 
             slide.notes_slide.notes_text_frame.text = s["notes"]
     path = _out_path(filename, title, ".pptx")
     deck.save(path)
+    activity.offer_undo(kind="remove_created", path=str(path))
     return f"Created presentation '{title}' ({len(slides or [])} slides + title) at {path}."
 
 
@@ -275,6 +278,7 @@ async def fill_pdf_form(path: str, values: dict | None = None) -> str:
     out = _out_path("", f"{p.stem} filled", ".pdf")
     with open(out, "wb") as fh:
         writer.write(fh)
+    activity.offer_undo(kind="remove_created", path=str(out))
     note = f" Unknown fields skipped: {', '.join(unknown)}." if unknown else ""
     return f"Filled {len(values) - len(unknown)} fields and saved {out}.{note}"
 

@@ -508,5 +508,22 @@ async def stop_screen_memory() -> str:  # cancels a task (loop-only)
 )
 async def remember(fact: str, category: str = "general") -> str:
     from ...memory import store
-    await store.save(fact, category)
+    saved = await store.save(fact, category)
+    from ... import activity
+    if isinstance(saved, dict) and saved.get("id"):
+        activity.offer_undo(kind="forget_memory", id=saved["id"])
     return f"Remembered: {fact}"
+
+
+@tool(
+    name="undo_last",
+    description="Undo the last thing Jarvis did that can be undone — \"undo that\", "
+                "\"put it back\": moves a file back, restores an overwritten or trashed "
+                "file, removes a document or folder it just created, forgets what it just "
+                "saved.",
+    parameters={"type": "object", "properties": {}},
+    risk="confirm",
+)
+def undo_last() -> str:
+    from ... import activity
+    return activity.undo_last()

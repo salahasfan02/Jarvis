@@ -130,6 +130,9 @@ def screen_click(target: str, occurrence: int = 1, double: bool = False) -> str:
     from ...ui_bridge import control_blocked
     if control_blocked():
         return "Stopped — the user pressed the emergency stop. Don't continue."
+    from ...automation import guard
+    if reason := guard.check():
+        return reason
     if not _accessibility_ok():
         return ("I can see the screen but macOS won't let me click yet. Ask the user to "
                 f"allow Jarvis (or the Terminal running it) in {_PERMS} → Accessibility, "
@@ -227,14 +230,24 @@ async def browser_click(target: str, tab_index: int = 0, occurrence: int = 1) ->
     browser = context.browser_name()
 
     def run() -> str:
+        from ...automation import guard
+        if reason := guard.app_reason(browser):
+            return reason
         idx = tab_index
+        tabs = context.list_tabs(browser)
         if idx:
+            url = next((x["url"] for x in tabs if x["index"] == idx), "")
+            if reason := guard.site_reason(url):
+                return reason
             _focus_tab(browser, idx)
         else:
             prop = ("active tab index of front window" if "Chrome" in browser
                     else "index of current tab of front window")
             ok, out = _osascript(f'tell application "{browser}" to get {prop}')
             idx = int(out) if ok and out.isdigit() else 0
+            url = next((x["url"] for x in tabs if x["index"] == idx), "")
+            if reason := guard.site_reason(url):
+                return reason
         if idx:
             js = _DOM_CLICK % (json.dumps(target), max(occurrence, 1))
             out = _js_in_tab(browser, idx, js)

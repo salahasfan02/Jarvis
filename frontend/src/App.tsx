@@ -12,6 +12,7 @@ import { ChatEvent, ChatSocket } from "./lib/ws";
 import { requestFrame } from "./lib/camera";
 import { CameraPage } from "./pages/CameraPage";
 import { RoutinesPage } from "./pages/RoutinesPage";
+import { ActivityPage } from "./pages/ActivityPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SkillsPage } from "./pages/SkillsPage";
@@ -122,7 +123,8 @@ export default function App() {
     setStreaming(null);
     setInput("");
     // Deliberately no navigation: talking from the Core stays on the Core.
-    socket.chat(target, content, modeRef.current);
+    // Spoken requests get short, speakable answers.
+    socket.chat(target, content, modeRef.current, lastInputWasVoice.current === true);
   }, [socket]);
 
   // ---- attachments & workspace mode ----
@@ -392,6 +394,7 @@ export default function App() {
       voice.update({
         language: settings.voice?.language ?? "en-US",
         wakeWords: settings.assistant?.wake_words ?? ["jarvis"],
+        bargeIn: !!settings.voice?.conversation_mode,
       });
     }
   }, [voice, settings]);
@@ -712,6 +715,7 @@ export default function App() {
         {page === "projects" && <ProjectsPage onOpenConversation={openConversation} />}
         {page === "skills" && <SkillsPage />}
         {page === "routines" && <RoutinesPage />}
+        {page === "activity" && <ActivityPage />}
         {page === "camera" && (
           <CameraPage speakReplies={settings?.voice?.tts_enabled ?? false}
                       jarvisReply={busy ? streaming

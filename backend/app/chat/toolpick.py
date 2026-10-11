@@ -17,6 +17,7 @@ from ..llm import ollama_client
 from ..tools import base as tools
 
 KEEP = EXTRAS = 4    # extra tools per request, on top of the core set
+REPLY_TOOLS = {"send_reply", "draft_reply"}
 
 # Offered on EVERY request, first and always in this order: with the base
 # system prompt they form one shared prompt opening that Ollama keeps cached
@@ -71,6 +72,9 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     "minutes before": ("create_routine",), "each morning": ("create_routine",),
     "tell me when": ("create_routine", "watch_screen"), "let me know when": ("create_routine", "watch_screen"),
     "arrives": ("create_routine",),
+    "undo": ("undo_last",), "put it back": ("undo_last",),
+    "shortcut": ("run_shortcut", "list_shortcuts"), "scene": ("run_shortcut",),
+    "lights": ("run_shortcut",), "focus": ("run_shortcut",), "homekit": ("run_shortcut",),
 }
 
 
@@ -100,6 +104,11 @@ async def select(user_content: str, tool_list: list[tools.Tool],
     """Extra (non-core) tools worth offering for this message, registry order.
     The core tools are always offered on top (see arrange)."""
     candidates = [t for t in tool_list if t.name not in CORE]
+    # Replies answer an email the user received. Offered for a NEW email
+    # ("email my landlord…") they got called with made-up ids.
+    if not (re.search(r"\b(?:repl|respond|answer)", user_content, re.I)
+            or (recent or set()) & {"read_emails", "search_emails", "read_email"}):
+        candidates = [t for t in candidates if t.name not in REPLY_TOOLS]
     if not candidates:
         return []
     query = await ollama_client.embed(user_content[:400])

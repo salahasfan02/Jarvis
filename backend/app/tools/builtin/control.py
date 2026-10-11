@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from ...automation import ax
+from ...automation import ax, guard
 from ...ui_bridge import control_blocked, screen_activity_sync
 from ..base import tool
 from .screen_click import _PERMS, _accessibility_ok, _activate, _click_at, _find_on_screen
@@ -100,12 +100,12 @@ def _locate(target: str, app: str, occurrence: int = 1, roles=None):
     return None, None, "", []
 
 
-def _guard() -> str:
+def _guard(app: str = "") -> str:
     if control_blocked():
         return STOPPED
     if not _accessibility_ok():
         return NO_AX
-    return ""
+    return guard.check(app)   # off-limits apps and sites
 
 
 # ---- tools ------------------------------------------------------------------------------
@@ -125,6 +125,8 @@ def _guard() -> str:
 def ui_elements(app: str = "", query: str = "") -> str:
     if not ax.trusted():
         return NO_AX
+    if reason := guard.check(app):
+        return reason
     if app:
         _activate(app)
     els, name = ax.elements(app, include_menus=False)
@@ -153,7 +155,7 @@ def ui_elements(app: str = "", query: str = "") -> str:
 )
 async def ui_press(target: str, app: str = "", occurrence: int = 1) -> str:
     def run() -> str:
-        if err := _guard():
+        if err := _guard(app):
             return err
         if app:
             _activate(app)
@@ -192,7 +194,7 @@ async def ui_press(target: str, app: str = "", occurrence: int = 1) -> str:
 async def ui_type(text: str, field: str = "", app: str = "", submit: bool = False,
                   replace: bool = True) -> str:
     def run() -> str:
-        if err := _guard():
+        if err := _guard(app):
             return err
         if app:
             _activate(app)
@@ -234,7 +236,7 @@ async def ui_type(text: str, field: str = "", app: str = "", submit: bool = Fals
 )
 async def press_keys(keys: str, app: str = "") -> str:
     def run() -> str:
-        if err := _guard():
+        if err := _guard(app):
             return err
         if app:
             _activate(app)
@@ -266,7 +268,7 @@ async def scroll(direction: str, amount: float = 1, app: str = "") -> str:
     import Quartz
 
     def run() -> str:
-        if err := _guard():
+        if err := _guard(app):
             return err
         if app:
             _activate(app)
@@ -309,7 +311,7 @@ async def drag(source: str, destination: str, app: str = "") -> str:
     import Quartz
 
     def run() -> str:
-        if err := _guard():
+        if err := _guard(app):
             return err
         if app:
             _activate(app)

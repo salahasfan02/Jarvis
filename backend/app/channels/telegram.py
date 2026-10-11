@@ -622,7 +622,7 @@ class TelegramBot:
         status: dict = {"message_id": None, "steps": []}
         final, failed = "", False
         try:
-            async for event in chat_service.run_chat(conv_id, text):
+            async for event in chat_service.run_chat(conv_id, text, spoken=voice_in):
                 kind = event.get("type")
                 if kind == "tool_start":
                     await self._expire_pending(chat_id)

@@ -52,8 +52,9 @@ export class ChatSocket {
     }
   }
 
-  chat(conversationId: string | null, content: string, mode: "chat" | "code" = "chat") {
-    this.send({ type: "chat", conversation_id: conversationId, content, mode });
+  chat(conversationId: string | null, content: string, mode: "chat" | "code" = "chat",
+       voice = false) {
+    this.send({ type: "chat", conversation_id: conversationId, content, mode, voice });
   }
 
   confirm(id: string, approved: boolean, tool?: string, remember?: boolean) {

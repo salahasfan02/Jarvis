@@ -24,7 +24,11 @@ from ..base import tool
 )
 def remember_person(name: str, relation: str = "", email: str = "", phone: str = "",
                     notes: str = "") -> str:
+    is_new = not people.known(name)
     p = people.remember(name, relation, email, phone, notes)
+    if is_new:   # undoing an update must not delete someone saved earlier
+        from ... import activity
+        activity.offer_undo(kind="forget_person", name=p["name"])
     return f"Saved: {people.describe(p)}."
 
 

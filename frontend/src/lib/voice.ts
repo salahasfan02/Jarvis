@@ -41,6 +41,7 @@ export interface VoiceOptions {
   onTranscript: (text: string) => void;   // final command text
   onInterim: (text: string) => void;      // live partial text
   onWake: () => void;
+  bargeIn?: boolean;                      // conversation mode: talking over Jarvis interrupts it
   onStateChange: (state: "idle" | "listening" | "waiting-wake") => void;
   onPermissionDenied?: () => void;        // mic blocked — stop auto-restarting
 }
@@ -244,6 +245,7 @@ class MicSegmenter {
   maxMs = 8000;             // longest utterance before it's cut anyway
   onSegment: (wav: Blob, ms: number) => void = () => {};
   onLevel: (level: number) => void = () => {};
+  onSpeechStart: () => void = () => {};
   onDead: () => void = () => {};
   onSuspended: (suspended: boolean) => void = () => {};
 
@@ -344,6 +346,7 @@ class MicSegmenter {
       this.loudRun = rms > threshold ? this.loudRun + 1 : 0;
       if (this.loudRun >= 2) {
         this.inSpeech = true;
+        this.onSpeechStart();
         this.segment = [...this.preRoll];
         this.segRms = [];
         this.preRoll = [];
@@ -386,6 +389,8 @@ export class WhisperVoiceEngine {
   constructor(opts: VoiceOptions) {
     this.opts = opts;
     this.mic.onSegment = (wav) => { this.queue.push(wav); this.drain(); };
+    // Someone talks while Jarvis speaks: turn its voice down straight away.
+    this.mic.onSpeechStart = () => { if (isSpeaking()) duckSpeech(true); };
     this.mic.onLevel = (level) => voiceBus.dispatchEvent(new CustomEvent("mic-level", { detail: level }));
     this.mic.onDead = () => this.restartCapture();
     // Browsers keep audio off until the page has been clicked once; say so
@@ -463,6 +468,7 @@ export class WhisperVoiceEngine {
         const text = (await this.transcribe(wav, hint)).trim();
         if (gen !== this.generation) return;
         noteHeard(text, command || !!findWake(text, this.opts.wakeWords));
+        if (!text && isSpeaking()) duckSpeech(false);
         if (mode === "ptt") this.finishPtt(text);
         else if (mode === "wake") this.onWakeText(text);
       }
@@ -481,6 +487,24 @@ export class WhisperVoiceEngine {
   }
 
   private onWakeText(text: string) {
+    if (isSpeaking() && !this.awaitingCommand) {
+      // Talking over Jarvis. "Jarvis, …" is handled below (it stops speaking).
+      if (!findWake(text, this.opts.wakeWords)) {
+        const words = text.trim().split(/\s+/).filter(Boolean);
+        if (/^\s*(stop|cancel|quiet|enough|shut up)\b/i.test(text)) {
+          stopSpeaking();
+          this.opts.onTranscript(text);   // the app treats "stop" as the emergency stop
+          return;
+        }
+        if (this.opts.bargeIn && words.length >= 3 && !isEchoOfSpeech(text)) {
+          stopSpeaking();                 // conversation mode: just answer
+          this.opts.onTranscript(text);
+          return;
+        }
+        duckSpeech(false);                // TV, someone else, or its own echo
+        return;
+      }
+    }
     if (this.awaitingCommand) {
       // Just the wake word again ("Jarvis?") isn't a command: keep listening.
       const again = findWake(text, this.opts.wakeWords);
@@ -591,7 +615,29 @@ function emitAmplitude(a: number) {
 }
 
 let currentAudio: HTMLAudioElement | null = null;
+let currentGain: GainNode | null = null;
+let ducked = false;
+let spokenRecently = "";   // what Jarvis just said, to tell its echo from the user
 let ampTimer: any = null;
+
+export function isSpeaking(): boolean {
+  return pumping || speechSynthesis.speaking;
+}
+
+/** Turn Jarvis's voice down while the user talks over it (and back up). */
+export function duckSpeech(on: boolean) {
+  ducked = on;
+  if (currentGain) currentGain.gain.setTargetAtTime(on ? 0.25 : 1, currentGain.context.currentTime, 0.05);
+}
+
+/** Was this "speech" just Jarvis's own voice picked up by the mic? */
+export function isEchoOfSpeech(text: string): boolean {
+  const words = (s: string) => s.toLowerCase().match(/[a-z']+/g) ?? [];
+  const heard = words(text);
+  if (!heard.length) return true;
+  const said = new Set(words(spokenRecently));
+  return heard.filter((w) => said.has(w)).length / heard.length >= 0.6;
+}
 
 function cleanText(text: string): string {
   return text
@@ -647,6 +693,7 @@ async function pump() {
   emitSpeaking(true);
   while (queue.length > 0 && gen === generation) {
     const item = queue.shift()!;
+    spokenRecently = (spokenRecently + " " + item.text).slice(-600);
     const blob = await item.wav;
     if (gen !== generation) break;
     if (blob) await playWavReactive(blob, item.rate, gen);
@@ -692,9 +739,13 @@ function playWavReactive(blob: Blob, rate: number, gen: number): Promise<void> {
 
     const ctx = new AudioContext();
     const source = ctx.createMediaElementSource(audio);
+    const gain = ctx.createGain();            // lets the user talk over it (duckSpeech)
+    gain.gain.value = ducked ? 0.25 : 1;
+    currentGain = gain;
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
-    source.connect(analyser);
+    source.connect(gain);
+    gain.connect(analyser);
     analyser.connect(ctx.destination);
     const data = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
 
@@ -710,6 +761,7 @@ function playWavReactive(blob: Blob, rate: number, gen: number): Promise<void> {
     audio.onplay = () => tick();
     const end = () => {
       cancelAnimationFrame(raf);
+      if (currentGain === gain) currentGain = null;
       URL.revokeObjectURL(url);
       ctx.close().catch(() => {});
       currentAudio = null;
@@ -725,6 +777,7 @@ function playWavReactive(blob: Blob, rate: number, gen: number): Promise<void> {
 export function stopSpeaking() {
   generation++;          // cancels the pump loop and any queued sentences
   queue = [];
+  ducked = false;
   speechSynthesis.cancel();
   if (currentAudio) {
     currentAudio.pause();
