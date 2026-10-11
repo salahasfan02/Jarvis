@@ -699,6 +699,14 @@ async def vision_ask(body: dict):
     """Answer a question about a camera/image frame (base64). Streams the reply."""
     image_b64 = (body.get("image") or "").split(",")[-1]  # strip data: prefix
     question = (body.get("question") or "What do you see?").strip()
+    if image_b64:   # smaller image, same answer, much faster
+        import base64 as _b64
+        from ..vision import ocr
+        try:
+            image_b64 = _b64.b64encode(await asyncio.to_thread(
+                ocr.shrink_for_vision, _b64.b64decode(image_b64))).decode()
+        except Exception:
+            pass
     vision_model = settings.get("ollama.vision_model", "")
     if not vision_model:
         async def no_model():

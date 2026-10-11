@@ -122,7 +122,9 @@ async def _describe_image(path: Path, question: str) -> str:
     if not vision_model:
         return ("Image captured at " + str(path) + ", but no vision model is configured. "
                 "Set one in Settings (e.g. pull 'llava' or 'llama3.2-vision').")
-    img_b64 = base64.b64encode(path.read_bytes()).decode()
+    from ...vision import ocr
+    small = await asyncio.to_thread(ocr.shrink_for_vision, path.read_bytes())
+    img_b64 = base64.b64encode(small).decode()
     text = await ollama_client.chat_once(
         [{"role": "user", "content": question, "images": [img_b64]}],
         model=vision_model)
@@ -146,7 +148,15 @@ async def screen_look(question: str = "Describe what is on this screen.") -> str
     if not path.exists() or path.stat().st_size == 0:
         return "Screen capture failed — check Screen Recording permission in System Settings."
     try:
-        return await _describe_image(path, question)
+        # The exact on-screen text helps the vision model with small print.
+        from ...vision import ocr
+        try:
+            text = (await ocr.ocr_file(path))[:3000]
+        except Exception:
+            text = ""
+        prompt = (f"{question}\n\nExact text visible on the screen (from OCR), for "
+                  f"reference:\n{text}" if text.strip() else question)
+        return await _describe_image(path, prompt)
     finally:
         path.unlink(missing_ok=True)
 

@@ -7,6 +7,7 @@ about them. Attachments persist with the conversation until removed.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import tempfile
@@ -62,6 +63,11 @@ def _extract_zip(data: bytes) -> str:
     return "\n".join(parts)
 
 
+def _shrink(data: bytes) -> bytes:
+    from ..vision import ocr
+    return ocr.shrink_for_vision(data)
+
+
 async def _describe_image(data: bytes, name: str, question: str = "") -> str:
     parts = []
     # exact text via Apple Vision OCR
@@ -90,7 +96,8 @@ async def _describe_image(data: bytes, name: str, question: str = "") -> str:
                               if question else
                               "Describe this image thoroughly: contents, layout, "
                               "any diagrams or UI elements, and anything notable."),
-                  "images": [base64.b64encode(data).decode()]}],
+                  "images": [base64.b64encode(await asyncio.to_thread(
+                      _shrink, data)).decode()]}],
                 model=vision_model)
             if description:
                 parts.append("Visual description:\n" + description[:3000])
