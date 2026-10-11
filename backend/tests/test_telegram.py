@@ -746,3 +746,40 @@ def test_a_document_about_a_topic_is_researched_before_it_is_written(env, monkey
     assert written == [] and reports == ["mcp servers"]
     assert "research_report" in llm.rounds[1]["messages"][-1]["content"]
     assert "research_report" in llm.rounds[1]["tools"]
+
+
+def test_after_a_no_jarvis_is_not_pushed_to_act(env):
+    fake, make_bot, script = env
+    llm = script(tool("send_email", {"to": "a@b.com", "subject": "Hi", "body": "Hello"}),
+                 answer("Okay, I won't send it. I'll keep it in mind if you change your mind."))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("email a@b.com saying hello"))
+        await until(lambda: any("reply_markup" in m for m in fake.sent("sendMessage")))
+        ask = next(m for m in fake.sent("sendMessage") if "reply_markup" in m)
+        await bot.handle(button(ask["reply_markup"]["inline_keyboard"][0][1]["callback_data"]))
+        await until(lambda: any("I won't send it" in t for t in fake.texts()))
+        await bot.stop()
+
+    run(main())
+    assert len(llm.rounds) == 2          # no "you said you would…" push after the no
+
+
+def test_a_false_claim_repeated_after_the_nudge_is_taken_out(env, monkeypatch, tmp_path):
+    fake, make_bot, script = env
+    monkeypatch.setattr(registry.get("list_directory"), "handler",
+                        lambda **k: f"{tmp_path} (1 item, newest first):\n2026-10-11 15:03  a.png")
+    script(tool("list_directory", {"path": str(tmp_path)}),
+           answer("I've sent you the file."),
+           answer("Done — I've sent you the file. It's a screenshot from today."))
+
+    async def main():
+        bot = make_bot()
+        await bot.handle(message("what's the newest file in that folder"))
+        await until(lambda: any("screenshot from today" in t for t in fake.texts()))
+        await bot.stop()
+
+    run(main())
+    final = fake.texts()[-1]
+    assert "sent you" not in final and "screenshot from today" in final

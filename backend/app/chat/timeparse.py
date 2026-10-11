@@ -108,3 +108,48 @@ def when(text: str, now: datetime.datetime | None = None) -> datetime.datetime |
     if day is None and result <= now:
         result += datetime.timedelta(days=1)
     return result
+
+
+# ---- finding a time inside a whole request (English or Arabic) ---------------------
+
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_AR_HOURS = [("الحادية عشرة", 11), ("الثانية عشرة", 12), ("الواحدة", 1), ("الثانية", 2),
+             ("الثالثة", 3), ("الرابعة", 4), ("الخامسة", 5), ("السادسة", 6), ("السابعة", 7),
+             ("الثامنة", 8), ("التاسعة", 9), ("العاشرة", 10)]
+
+
+def _from_arabic(text: str) -> str:
+    """'الساعة السادسة مساء' -> ' at 6 pm' (the words that matter for a time)."""
+    t = text.translate(_AR_DIGITS)
+    if not re.search(r"[؀-ۿ]", t):
+        return t
+    for word, n in _AR_HOURS:
+        t = t.replace(word, f" {n} ")
+    t = re.sub(r"(\d+)\s*(?:و\s*)?النصف", r"\1:30", t)
+    t = re.sub(r"(\d+)\s*(?:و\s*)?الربع", r"\1:15", t)
+    t = re.sub(r"مساءً|مساءا|مساء|ليلاً|ليلا|بعد الظهر|ظهراً|ظهرا|العصر", " pm ", t)
+    t = re.sub(r"صباحاً|صباحا|الصبح|فجراً|فجرا", " am ", t)
+    for ar, en in (("الساعة", "at"), ("غداً", "tomorrow"), ("غدا", "tomorrow"), ("بكرة", "tomorrow"),
+                   ("الليلة", "tonight"), ("اليوم", "today")):
+        t = t.replace(ar, f" {en} ")
+    return re.sub(r"\s+", " ", t)
+
+
+_FIND_CLOCK = re.compile(
+    r"\bat\s+(\d{1,2}(?:[:.]\d{2})?(?:\s*(?:am|pm|a\.m\.|p\.m\.))?)(?![\d:])"
+    r"|\b(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.))"
+    r"|\b(\d{1,2}:\d{2})\b|\b(noon|midnight)\b")
+
+
+def find_when(text: str, now: datetime.datetime | None = None) -> datetime.datetime | None:
+    """The time a whole request mentions — "remind me to call mum at 6pm",
+    "ذكرني بالاتصال بأمي الساعة السادسة مساء" — or None when it gives none."""
+    t = _from_arabic(text).lower()
+    m = _FIND_CLOCK.search(t)
+    if not m:
+        return None
+    clock = next(g for g in m.groups() if g)
+    day = next((w for w in ("tomorrow", "tonight", "today") if re.search(rf"\b{w}\b", t)), "")
+    weekday = next((d for d in _DAYS if re.search(rf"\b{d}\b", t)), "")
+    return when(f"{day or weekday} at {clock}".strip() if clock not in ("noon", "midnight")
+                else f"{day or weekday} {clock}".strip(), now)

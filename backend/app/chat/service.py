@@ -34,7 +34,7 @@ from ..security import audit
 from ..security.permissions import confirmations
 from ..tools import base as tools
 from ..tools.builtin import research as research_tool
-from . import compact, prefetch, quick, toolpick
+from . import compact, prefetch, quick, timeparse, toolpick
 
 SMART_WINDOW_RULES = """Smart context rules (IMPORTANT):
 - Before opening any website, check the open tabs (they are listed above, or
@@ -296,7 +296,9 @@ _CLAIM_FAMILIES = (
     (r"(?:created|made|written|wrote|saved|added)\b|\bhas been (?:created|saved|added)",
      ("create_", "append_", "save", "move_file", "remember", "update_", "set_", "calendar_create",
       "fill_form", "research_report")),
-    (r"drafted\b|\bhas been drafted", ("draft_",)),
+    (r"(?:drafted\b|(?:prepared|put together) (?:a |an |the |your )?(?:\w+ )?"
+     r"(?:draft|email|message|document|file|report|reply|note)s?\b)|\bhas been drafted",
+     ("draft_", "create_", "research_report", "write_file")),
     (r"(?:scheduled|booked)\b|\bhas been scheduled", ("calendar_create", "create_")),
     (r"(?:deleted|trashed|removed)\b|\bhas been deleted", ("trash", "delete", "forget", "remove")),
     (r"moved\b|\bhas been moved", ("move_",)),
@@ -408,6 +410,13 @@ def _unbacked_claim(reply: str, tool_events: list[dict]) -> bool:
     done = [e["name"] for e in tool_events if _took_effect(e["result"])]
     return any(claim.search(reply) and not any(n.startswith(prefixes) for n in done)
                for claim, prefixes in _CLAIMS)
+
+
+def _without_claims(text: str, tool_events: list[dict]) -> str:
+    """The text minus sentences claiming actions no tool did."""
+    kept = [x for x in re.split(r"(?<=[.!?…])\s+", text.strip())
+            if x.strip() and not _unbacked_claim(x, tool_events)]
+    return " ".join(kept)
 
 
 def _narration(sentence: str) -> bool:
@@ -744,6 +753,9 @@ async def run_chat(conversation_id: str, user_content: str,
 
             if not tool_calls:
                 final_text = round_text
+                # They said no to something this turn: respect it — no pushing
+                # the model to "follow through", send, or make the file anyway.
+                said_no = any(e["result"].startswith("The user DENIED") for e in tool_events)
                 if announced and (not round_text.strip() or _ANNOUNCES.search(round_text[-200:])):
                     # Pushed to do what it said, and it still didn't: don't leave
                     # "I'll send it now" standing as if it were happening.
@@ -787,7 +799,7 @@ async def run_chat(conversation_id: str, user_content: str,
                     llm_messages.append({"role": "user", "content": CLAIM_NUDGE})
                     full_response = ""
                     continue
-                if (tool_schemas and not intent_nudged and _WANTS_FILE.search(user_content)
+                if (tool_schemas and not intent_nudged and not said_no and _WANTS_FILE.search(user_content)
                         and not any(e["name"].startswith(_MAKES_FILE) for e in tool_events)):
                     # "Write a report as a Word document" answered with the
                     # report as chat text: the file was the point.
@@ -798,7 +810,7 @@ async def run_chat(conversation_id: str, user_content: str,
                     full_response = full_response[:len(full_response) - len(round_text)]
                     yield {"type": "reset_text", "content": full_response}
                     continue
-                if (tool_schemas and not intent_nudged and round_text.strip()
+                if (tool_schemas and not intent_nudged and not said_no and round_text.strip()
                         and _ASKS_ACTION.search(user_content) and _STALLS.search(round_text)
                         and not any(re.search(r"ask (?:the user )?which|several", e["result"], re.I)
                                     for e in tool_events)):
@@ -810,7 +822,7 @@ async def run_chat(conversation_id: str, user_content: str,
                     full_response = full_response[:len(full_response) - len(round_text)]
                     yield {"type": "reset_text", "content": full_response}
                     continue
-                if (tool_schemas and not intent_nudged and round_text.strip()
+                if (tool_schemas and not intent_nudged and not said_no and round_text.strip()
                         and _ANNOUNCES.search(round_text[-200:])):
                     # "Let me find your CV files now." — and then nothing. Hold
                     # it to what it just said it would do — with the tools that
@@ -824,7 +836,7 @@ async def run_chat(conversation_id: str, user_content: str,
                     llm_messages.append({"role": "user", "content": INTENT_NUDGE})
                     continue
                 channel = channels.current.get()
-                if (tool_schemas and not send_nudged and tool_events and channel is not None
+                if (tool_schemas and not send_nudged and not said_no and tool_events and channel is not None
                         and not getattr(channel, "auto_approve", False)
                         and _ASKED_TO_SEND.search(user_content)
                         and not _SENDS_MESSAGE.search(user_content)
@@ -885,6 +897,11 @@ async def run_chat(conversation_id: str, user_content: str,
                         tool_schemas = [x.to_ollama() for x in tool_list]
                     llm_messages.append({"role": "tool", "tool_name": name, "content": RESEARCH_FIRST})
                     continue
+                if (name == "create_reminder" and isinstance(args, dict) and not args.get("due")
+                        and (due := timeparse.find_when(user_content))):
+                    # "Remind me to call mum at 6pm" with the time left out of the
+                    # call: the reminder would come with no alert at all.
+                    args = {**args, "due": due.strftime("%Y-%m-%d %H:%M")}
                 if not attach_checked and (what := _missing_attachment(user_content, name, args,
                                                                        tool_events)):
                     attach_checked = True
@@ -932,6 +949,19 @@ async def run_chat(conversation_id: str, user_content: str,
     if not full_response.strip():
         full_response = EMPTY_FALLBACK
         yield {"type": "token", "content": full_response}
+    if (claim_checked and tool_events and final_text.strip()
+            and full_response.rstrip().endswith(final_text.strip())
+            and _unbacked_claim(final_text, tool_events)):
+        # Told once, and it still claims something that didn't happen: drop
+        # those sentences rather than let the false claim reach the user.
+        honest = _without_claims(final_text, tool_events)
+        if len(honest.strip()) < 15:
+            denied = any(e["result"].startswith("The user DENIED") for e in tool_events)
+            honest = "Okay — I didn't go ahead with that." if denied else UNFINISHED
+        mistakes.append("repeated a claim no tool backed")
+        full_response = full_response.rstrip()[:len(full_response.rstrip()) - len(final_text.strip())].rstrip()
+        full_response = (full_response + "\n\n" if full_response else "") + honest
+        final_text = honest
     tidy = _without_lead_ins(full_response, lead_ins, final_text)
     if not any(e["name"].startswith(_MAKES_FILE) for e in tool_events):
         tidy = _with_sources(tidy, sources)   # a document carries its own

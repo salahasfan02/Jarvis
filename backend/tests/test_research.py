@@ -180,6 +180,14 @@ def test_claims_must_match_a_tool_that_did_it():
     denied = listed + [{"name": "send_file", "result": "The user DENIED permission to run this tool."}]
     assert service._unbacked_claim("I've sent it.", denied)
     assert not service._unbacked_claim("Here are the 3 newest files.", listed)
+    # denied the send, then claimed a draft that was never made
+    refused = [{"name": "send_email", "result": "The user DENIED permission to run this tool."}]
+    assert service._unbacked_claim("I couldn't send it, but I've prepared a draft for you in Mail.", refused)
+    researched = [{"name": "research", "result": "Web research for: x"}]
+    assert not service._unbacked_claim("I've prepared a summary of what I found below.", researched)
+    assert service._unbacked_claim("I've prepared a Word document for you.", researched)
+    drafted = refused + [{"name": "draft_email", "result": "Draft saved in Mail and opened for review."}]
+    assert not service._unbacked_claim("I've prepared a draft for you in Mail.", drafted)
 
 
 def test_a_folder_listed_only_to_find_something_isnt_shown():
@@ -240,3 +248,15 @@ def test_an_email_meant_to_carry_a_file_must_attach_it():
                                            "send_email", no_file, [])
     assert not service._missing_attachment("email my CV to a@b.com", "send_email",
                                            {**no_file, "attachments": ["CV"]}, [])
+
+
+def test_a_reminder_time_is_found_in_english_or_arabic():
+    import datetime
+    from app.chat.timeparse import find_when
+    now = datetime.datetime(2026, 10, 11, 15, 0)
+    assert find_when("ذكرني بالاتصال بأمي الساعة السادسة مساء", now) == datetime.datetime(2026, 10, 11, 18, 0)
+    assert find_when("ذكرني غدا الساعة ٧ صباحا بالرياضة", now) == datetime.datetime(2026, 10, 12, 7, 0)
+    assert find_when("ذكرني الساعة الثامنة والنصف مساء", now) == datetime.datetime(2026, 10, 11, 20, 30)
+    assert find_when("remind me tomorrow at 9:30 to stretch", now) == datetime.datetime(2026, 10, 12, 9, 30)
+    assert find_when("remind me to buy milk", now) is None
+    assert find_when("send me 3 files", now) is None
