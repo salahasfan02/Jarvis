@@ -21,7 +21,11 @@ codesign --force --deep --sign - "$APP"
 # Only one Jarvis at a time: quit the installed one and any `npm start` copies.
 osascript -e 'tell application "Jarvis" to quit' >/dev/null 2>&1 || true
 pkill -f "jarvis/desktop/node_modules/electron/dist/Electron.app" >/dev/null 2>&1 || true
-sleep 1
+# Let their backend shut down so the new app starts a fresh one.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  lsof -nP -iTCP:8765 -sTCP:LISTEN >/dev/null 2>&1 || break
+  sleep 0.5
+done
 
 if [ -d "/Applications/Jarvis.app" ]; then
   rm -rf "/Applications/Jarvis.app"

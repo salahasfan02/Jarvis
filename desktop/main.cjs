@@ -21,9 +21,11 @@ const path = require("path");
 const { startScreenActivityFrame } = require("./overlay.cjs");
 
 const DEV_URL = "http://localhost:5173";
-// Packaged builds carry the UI in renderer/; dev loads Vite or the repo build.
+// Packaged builds carry the UI in Contents/Resources/renderer — a real folder,
+// not inside app.asar, because the Python backend serves it and can't read asar.
+// Dev loads Vite or the repo build.
 const PROD_INDEX = app.isPackaged
-  ? path.join(__dirname, "renderer", "index.html")
+  ? path.join(process.resourcesPath, "renderer", "index.html")
   : path.join(__dirname, "..", "frontend", "dist", "index.html");
 
 // The Python backend lives in the repo, not inside the .app. Resolution order:
@@ -77,7 +79,18 @@ function startBackend() {
 function loadFromBackend(win, url = APP_URL, tries = 0) {
   checkBackend((up) => {
     if (win.isDestroyed()) return;
-    if (up) return win.loadURL(url);
+    if (up) {
+      // A backend started some other way (e.g. an old copy) may not serve the UI.
+      return http.get(url, (res) => {
+        res.resume();
+        if (res.statusCode !== 404) return win.loadURL(url);
+        win.loadURL("data:text/html," + encodeURIComponent(
+          "<body style='background:#000;color:#3f6;font:14px monospace;display:grid;" +
+          "place-items:center;height:100vh;margin:0;text-align:center'><div>" +
+          "Another Jarvis backend is running without the interface.<br><br>" +
+          "Quit any other Jarvis (or <code>npm start</code>) and reopen this one.</div></body>"));
+      }).on("error", () => win.loadURL(url));
+    }
     if (tries === 0) {
       win.loadURL("data:text/html," + encodeURIComponent(
         "<body style='background:#000;color:#3f6;font:14px monospace;display:grid;" +

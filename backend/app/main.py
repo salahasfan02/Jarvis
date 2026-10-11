@@ -117,10 +117,12 @@ class SandboxedFiles(StaticFiles):
 app.mount("/projects", SandboxedFiles(directory=str(_projects), html=True), name="projects")
 
 
-# The built UI (npm run build), served same-origin for the desktop app.
-_ui = Path(os.environ.get("JARVIS_UI_DIR")
-           or Path(__file__).resolve().parents[2] / "frontend" / "dist")
-if (_ui / "index.html").is_file():
+# The built UI (npm run build), served same-origin for the desktop app: the copy
+# the app ships with, else the repo's build.
+_ui = next((d for d in (Path(os.environ.get("JARVIS_UI_DIR") or "/nonexistent"),
+                        Path(__file__).resolve().parents[2] / "frontend" / "dist")
+            if (d / "index.html").is_file()), None)
+if _ui:
     app.mount("/app", StaticFiles(directory=str(_ui), html=True), name="ui")
 
 

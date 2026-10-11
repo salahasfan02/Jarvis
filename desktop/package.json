@@ -20,8 +20,10 @@
       "main.cjs",
       "main-preload.cjs",
       "overlay.cjs",
-      "quick-preload.cjs",
-      "renderer/**/*"
+      "quick-preload.cjs"
+    ],
+    "extraResources": [
+      { "from": "renderer", "to": "renderer" }
     ],
     "mac": {
       "category": "public.app-category.productivity",
