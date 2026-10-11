@@ -9,6 +9,7 @@ from pathlib import Path
 
 # Must happen before `app` is imported: config resolves ~/.jarvis at import.
 os.environ["HOME"] = tempfile.mkdtemp(prefix="jarvis-test-home-")
+os.environ["JARVIS_LIGHTS_DIRECT"] = "1"   # fake bulbs live in this process, not the helper
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402

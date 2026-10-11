@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import stat
+import sys
 
 import pytest
 from kasa import AuthenticationError, Module
@@ -247,3 +248,16 @@ def test_music_requests_go_to_apple_music_unless_youtube_is_asked_for():
     assert _music_service("put on some relaxing jazz", "youtube_play", {"query": "relaxing jazz"}) == \
         ("music_play", {"query": "relaxing jazz"})
     assert _music_service("play the drake video on youtube", "youtube_play", {"query": "drake"})[0] == "youtube_play"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the helper is for macOS's Local Network privacy")
+def test_the_lights_helper_answers_from_its_own_process():
+    """The real helper process (no bulbs needed): answers, reports errors, and
+    keeps working across event loops."""
+    from app import lights_helper
+    lights.forget()
+    assert run(lights_helper.call("status")) == []
+    with pytest.raises(lights.LightsError, match="Settings → Smart lights"):
+        run(lights_helper.call("control", power="off"))
+    with pytest.raises(lights.LightsError, match="Unknown request"):
+        run(lights_helper.call("forget"))

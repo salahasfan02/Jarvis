@@ -20,6 +20,7 @@ import os
 import re
 import time
 
+from . import lights_helper
 from .config import JARVIS_HOME
 
 STORE = JARVIS_HOME / "lights.json"
@@ -98,7 +99,10 @@ def _kind(dev) -> str:
 async def connect_account(email: str, password: str, timeout: int = 6) -> list[dict]:
     """Find the lights on this network with the user's Tapo account and save
     a key for each. The password itself is never stored."""
-    from kasa import AuthenticationError, Credentials, Discover
+    if lights_helper.wanted():
+        return await lights_helper.call("connect_account", email=email, password=password,
+                                        timeout=timeout)
+    from kasa import AuthenticationError, Credentials
     creds = Credentials(email.strip(), password)
     found = await _discover(credentials=creds, timeout=timeout)
     lights, rejected, failed = [], 0, []
@@ -293,6 +297,9 @@ async def control(light_name: str = "", power: str = "", brightness: int | None 
                   change: int | None = None, color: str = "") -> str:
     """power: on | off | toggle | ''. brightness 1-100; change: +/- percent.
     color: a colour, a white shade ('warm') or a temperature."""
+    if lights_helper.wanted():
+        return await lights_helper.call("control", light_name=light_name, power=power,
+                                        brightness=brightness, change=change, color=color)
     from kasa import Module
     if not configured():
         raise LightsError("No lights are set up yet — connect your Tapo account in Settings → Smart lights.")
@@ -333,6 +340,8 @@ async def control(light_name: str = "", power: str = "", brightness: int | None 
 
 async def status() -> list[dict]:
     """Every light at once (in parallel), not waiting on ones that just failed."""
+    if lights_helper.wanted():
+        return await lights_helper.call("status")
     return list(await asyncio.gather(*(_status_one(light) for light in saved())))
 
 
