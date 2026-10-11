@@ -733,3 +733,4 @@ html.electron .app { padding-top: 28px; box-sizing: border-box; }
                 background: rgba(245, 166, 35, 0.15); color: #f5a623;
                 border: 1px solid rgba(245, 166, 35, 0.5); }
 .main { position: relative; }
+.announce-actions { display: flex; gap: 8px; margin-top: 10px; }

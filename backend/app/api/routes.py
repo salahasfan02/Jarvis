@@ -48,6 +48,12 @@ def get_settings():
 async def put_settings(body: SettingsPatch):
     audit.log("settings_changed", patch=body.patch)
     updated = settings.update(body.patch)
+    if (body.patch.get("proactive") or {}).get("enabled"):
+        # Proactive help rides on screen memory's captures: make sure it runs.
+        from ..vision import journal
+        if not journal.status()["running"]:
+            journal.start()
+            settings.update({"screen_memory": {"enabled": True}})
     if "enabled" in (body.patch.get("telegram") or {}):
         from ..channels import telegram
         await telegram.start()  # starts or stops the bot to match
@@ -542,6 +548,19 @@ def telegram_unpair(user_id: int):
 
 
 # --- screen activity frame -------------------------------------------------------
+
+@router.post("/proactive/preview")
+async def proactive_preview():
+    """Show what an offer of help looks like (Settings → Offer help when I'm stuck)."""
+    from .. import ui_bridge
+    sent = await ui_bridge.announce(
+        "💡 Want a hand?",
+        "You've had “ModuleNotFoundError: No module named 'requests'” on screen for about "
+        "10 minutes. (This is a preview.)", speak=False,
+        action={"label": "Help me", "prompt": "Explain how to fix \"ModuleNotFoundError: No "
+                "module named 'requests'\" in a Python project, briefly."})
+    return {"shown": sent}
+
 
 # --- setup check ------------------------------------------------------------------------
 

@@ -37,6 +37,13 @@ def _similar(a: str, b: str) -> float:
 async def _capture_and_summarize() -> str | None:
     from . import watcher
     text = await watcher._capture_text()
+    # Stuck on the same error for a while? (every capture, before the
+    # "screen barely changed" skip below — being stuck IS an unchanged screen)
+    try:
+        from . import proactive
+        proactive.observe(text)
+    except Exception:
+        pass
     if len(text.strip()) < 40:
         return None
     # skip if the screen barely changed since the last capture

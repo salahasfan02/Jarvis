@@ -160,14 +160,16 @@ async def request(kind: str, payload: dict | None = None, timeout: float = 20) -
         _pending.pop(rid, None)
 
 
-async def announce(title: str, text: str, speak: bool = True) -> bool:
+async def announce(title: str, text: str, speak: bool = True,
+                   action: dict | None = None) -> bool:
     """Show (and speak) a message in every open Jarvis window — routines,
-    triggers. Returns whether any window got it."""
+    triggers, offers of help. `action` ({label, prompt}) adds a button that
+    sends `prompt` as a request. Returns whether any window got it."""
     sent = False
     for ws in list(_sockets):
         try:
             await ws.send_json({"type": "announce", "title": title, "text": text,
-                                "speak": speak})
+                                "speak": speak, "action": action})
             sent = True
         except Exception:
             unregister(ws)

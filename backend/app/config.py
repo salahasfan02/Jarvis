@@ -68,6 +68,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "context": {
         "enabled": True,                # app/tab/music awareness in prompts
     },
+    "proactive": {
+        "enabled": False,               # offer help when stuck on the same error (uses screen memory)
+    },
     "screen_memory": {
         "enabled": False,               # background: watch screen -> save to memory
         "interval_seconds": 300,        # capture every 5 minutes

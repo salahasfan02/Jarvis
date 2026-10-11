@@ -691,6 +691,17 @@ export function SettingsPage(props: {
                       onChange={(v) => toggleScreenMemory(v)} />
             </div>
           </Row>
+          <Row label="Offer help when I'm stuck"
+               sub="If the same error stays on your screen for ~10 minutes, Jarvis offers to help (at most every 30 minutes, never during meetings). Uses screen memory, which this turns on.">
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn" onClick={() => fetch(`${API}/proactive/preview`, { method: "POST" })}>
+                Preview
+              </button>
+              <Toggle checked={(s as any).proactive?.enabled ?? false}
+                      onChange={(v) => { props.onPatch({ proactive: { enabled: v } } as any);
+                                         if (v) setTimeout(refreshScreenMem, 800); }} />
+            </div>
+          </Row>
         </div>
 
         <div className="panel">

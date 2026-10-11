@@ -49,7 +49,8 @@ export default function App() {
   const [agentName, setAgentName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
-  const [announcement, setAnnouncement] = useState<{ title: string; text: string } | null>(null);
+  const [announcement, setAnnouncement] = useState<
+    { title: string; text: string; action?: { label: string; prompt: string } | null } | null>(null);
   // Synthesize the acknowledgment phrases once (and again if the voice changes).
   useEffect(() => {
     const v = settings?.voice as any;
@@ -69,7 +70,8 @@ export default function App() {
   }, [page === "setup"]);
   useEffect(() => {
     if (!announcement) return;
-    const t = setTimeout(() => setAnnouncement(null), 15000);
+    // Offers of help stay up longer than plain announcements.
+    const t = setTimeout(() => setAnnouncement(null), announcement.action ? 60000 : 15000);
     return () => clearTimeout(t);
   }, [announcement]);
   const [input, setInput] = useState("");
@@ -258,7 +260,7 @@ export default function App() {
           break;
         case "announce":
           // A routine or trigger fired: show it, and say it if voice is on.
-          setAnnouncement({ title: e.title, text: e.text });
+          setAnnouncement({ title: e.title, text: e.text, action: e.action });
           if (e.speak && settingsRef.current?.voice?.tts_enabled) {
             enqueueSpeech(e.text, settingsRef.current.voice.tts_rate, settingsRef.current.voice.tts_voice);
           }
@@ -815,6 +817,20 @@ export default function App() {
         <div className="announce" role="status" onClick={() => setAnnouncement(null)}>
           <div className="announce-title">{announcement.title}</div>
           <div className="announce-text">{announcement.text}</div>
+          {announcement.action && (
+            <div className="announce-actions">
+              <button className="btn primary" onClick={(ev) => {
+                ev.stopPropagation();
+                const prompt = announcement.action!.prompt;
+                setAnnouncement(null);
+                lastInputWasVoice.current = false;
+                sendRef.current(prompt);
+              }}>{announcement.action.label}</button>
+              <button className="btn" onClick={(ev) => { ev.stopPropagation(); setAnnouncement(null); }}>
+                Not now
+              </button>
+            </div>
+          )}
         </div>
       )}
       {confirm && (
