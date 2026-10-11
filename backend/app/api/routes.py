@@ -857,11 +857,51 @@ async def stt_download(body: dict | None = None):
 
 @router.post("/stt/transcribe")
 async def stt_transcribe(request: Request, hint: str = "", command: int = 0):
-    from ..speech import stt
+    from ..speech import stt, voiceprint
     audio = await request.body()
     if not audio:
         return {"error": "empty audio"}
-    return await stt.transcribe(audio, hint=hint[:200], command=bool(command))
+    # Voice lock: someone else's voice (TV, visitors) is ignored.
+    allowed, match = await asyncio.to_thread(voiceprint.check, audio)
+    if not allowed:
+        audit.log("voice_rejected", score=round(match or 0, 3))
+        return {"text": "", "rejected": "voice", "score": match}
+    result = await stt.transcribe(audio, hint=hint[:200], command=bool(command))
+    if match is not None:
+        result["voice_score"] = round(match, 3)
+    return result
+
+
+# --- voice lock (experimental) -------------------------------------------------------
+
+@router.get("/voice/lock")
+async def voice_lock_status():
+    from ..speech import voiceprint
+    vp = voiceprint.enrolled()
+    return {"available": voiceprint.available(), "enrolled": vp is not None,
+            "seconds": (vp or {}).get("seconds"), "enabled": voiceprint.locked(),
+            "threshold": voiceprint.threshold()}
+
+
+@router.post("/voice/enroll")
+async def voice_enroll(request: Request, step: str = "add"):
+    """step=add (body: a WAV phrase) · finish · reset"""
+    from ..speech import voiceprint
+    if step == "reset":
+        voiceprint.enroll_reset()
+        return {"ok": True}
+    if step == "finish":
+        return await asyncio.to_thread(voiceprint.enroll_finish)
+    return await asyncio.to_thread(voiceprint.enroll_add, await request.body())
+
+
+@router.post("/voice/test")
+async def voice_test(request: Request):
+    """How closely does this recording match the enrolled voice?"""
+    from ..speech import voiceprint
+    s = await asyncio.to_thread(voiceprint.score, await request.body())
+    return {"score": None if s is None else round(s, 3), "threshold": voiceprint.threshold(),
+            "would_pass": s is None or s >= voiceprint.threshold()}
 
 
 # --- code studio ---------------------------------------------------------------

@@ -317,6 +317,18 @@ async def fix(cid: str) -> dict:
         name = settings.get(cid.split(":", 1)[1], "")
         asyncio.get_running_loop().create_task(_pull(name))
         return {"result": f"Downloading {name} in the background — re-check in a few minutes."}
+    if cid == "voiceprint_model":
+        from .speech import voiceprint
+
+        async def fetch_model():
+            import httpx
+            voiceprint.MODEL.parent.mkdir(parents=True, exist_ok=True)
+            async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
+                r = await client.get(voiceprint.MODEL_URL)
+                if r.status_code == 200:
+                    voiceprint.MODEL.write_bytes(r.content)
+        asyncio.get_running_loop().create_task(fetch_model())
+        return {"result": "Downloading the voice-lock model (28 MB) in the background."}
     if cid == "whisper_multi":
         from .speech import stt
         if stt.model_present("small"):

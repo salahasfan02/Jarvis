@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Gauge, ImagePlus, X } from "lucide-react";
 import { API, api, OllamaModel, pullModel, statsApi } from "../lib/api";
-import { VoiceDiag, voiceBus, voiceDiag } from "../lib/voice";
+import { recordUtterance, VoiceDiag, voiceBus, voiceDiag } from "../lib/voice";
 
 function Row(props: { label: string; sub?: string; children: React.ReactNode }) {
   return (
@@ -629,6 +629,7 @@ export function SettingsPage(props: {
               <option value="browser">Browser (Chrome, online)</option>
             </select>
           </Row>
+          <VoiceLock onPatch={props.onPatch} />
           <Row label="Also understand Arabic"
                sub="Commands can be in Arabic as well as English (Jarvis answers in the language you use, with macOS's Arabic voice). Listening for “Jarvis” stays on the English model. Downloads a 480 MB speech model the first time.">
             <Toggle checked={((s.voice as any).languages ?? ["en"]).includes("ar")}
@@ -846,5 +847,81 @@ export function SettingsPage(props: {
         </div>
       </div>
     </div>
+  );
+}
+
+
+const ENROLL_PHRASES = [
+  "Jarvis, what's the weather going to be like this afternoon?",
+  "Hey Jarvis, remind me to call my mum when I get home tonight.",
+  "Jarvis, play some relaxing music and turn the volume down a little.",
+];
+
+/** Voice lock (experimental): set up a voiceprint, calibrate, switch on. */
+function VoiceLock(props: { onPatch: (p: any) => void }) {
+  const [st, setSt] = useState<any>(null);
+  const [step, setStep] = useState(-1);          // enrolment phrase being recorded
+  const [msg, setMsg] = useState("");
+  const [score, setScore] = useState<number | null>(null);
+  const load = () => fetch(`${API}/voice/lock`).then((r) => r.json()).then(setSt).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const enrol = async () => {
+    await fetch(`${API}/voice/enroll?step=reset`, { method: "POST" });
+    for (let i = 0; i < ENROLL_PHRASES.length; i++) {
+      setStep(i);
+      setMsg(`Say: “${ENROLL_PHRASES[i]}”`);
+      const wav = await recordUtterance(10000);
+      if (!wav) { setMsg("Didn't hear anything — try again."); setStep(-1); return; }
+      const r = await fetch(`${API}/voice/enroll?step=add`, { method: "POST", body: wav }).then((x) => x.json());
+      if (r.error) { setMsg(r.error); i--; continue; }
+    }
+    setStep(-1);
+    const r = await fetch(`${API}/voice/enroll?step=finish`, { method: "POST" }).then((x) => x.json());
+    setMsg(r.error ?? "Voice set up. Now press “Test my voice” a few times to see your scores.");
+    load();
+  };
+  const test = async () => {
+    setMsg("Say anything for a couple of seconds…");
+    const wav = await recordUtterance(8000);
+    if (!wav) { setMsg("Didn't hear anything."); return; }
+    const r = await fetch(`${API}/voice/test`, { method: "POST", body: wav }).then((x) => x.json());
+    setScore(r.score);
+    setMsg(r.score === null ? "Too short to judge — speak a bit longer."
+      : `Match ${Math.round(r.score * 100)}% — ${r.would_pass ? "would be accepted" : "would be ignored"} at the current strictness.`);
+  };
+
+  if (!st) return null;
+  return (
+    <Row label="Voice lock (experimental)"
+         sub={!st.available ? "Only answer your voice. Needs a small voice model (28 MB)."
+              : st.enrolled ? `Only answer your voice — ${st.enabled ? "ON" : "off"}. Calibrate with “Test my voice”: ask a friend or the TV too; pick a strictness between their score and yours.`
+              : "Only answer your voice. Record three short sentences to set it up."}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end", maxWidth: 360 }}>
+        {!st.available ? (
+          <button className="btn" onClick={() => fetch(`${API}/setup/fix/voiceprint_model`, { method: "POST" })
+                                              .then(() => setTimeout(load, 8000))}>Download</button>
+        ) : (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn" disabled={step >= 0} onClick={enrol}>
+              {st.enrolled ? "Re-record my voice" : "Set up my voice"}
+            </button>
+            {st.enrolled && <button className="btn" onClick={test}>Test my voice</button>}
+            {st.enrolled && (
+              <Toggle checked={st.enabled} onChange={(v) => { props.onPatch({ voice: { lock: { enabled: v } } }); setTimeout(load, 300); }} />
+            )}
+          </div>
+        )}
+        {st.enrolled && (
+          <label className="sub" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            Strictness {Math.round(st.threshold * 100)}%
+            <input type="range" min={20} max={80} value={Math.round(st.threshold * 100)}
+                   onChange={(e) => setSt({ ...st, threshold: parseInt(e.target.value) / 100 })}
+                   onMouseUp={(e) => props.onPatch({ voice: { lock: { threshold: parseInt((e.target as HTMLInputElement).value) / 100 } } })} />
+          </label>
+        )}
+        {msg && <div className="sub" style={{ color: score !== null && st.enrolled ? "var(--accent)" : undefined }}>{msg}</div>}
+      </div>
+    </Row>
   );
 }

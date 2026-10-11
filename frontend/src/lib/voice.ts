@@ -376,6 +376,26 @@ class MicSegmenter {
   }
 }
 
+/** Record one utterance (for setting up the voice lock): resolves with a
+ *  WAV once the speaker pauses, or null after `timeoutMs` of nothing. */
+export function recordUtterance(timeoutMs = 8000): Promise<Blob | null> {
+  return new Promise(async (resolve) => {
+    const mic = new MicSegmenter();
+    mic.silenceMs = 900;
+    let done = false;
+    const finish = (wav: Blob | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      mic.stop();
+      resolve(wav);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    mic.onSegment = (wav, ms) => { if (ms >= 1200) finish(wav); };
+    if (!(await mic.start())) finish(null);
+  });
+}
+
 export class WhisperVoiceEngine {
   private opts: VoiceOptions;
   private mode: "off" | "ptt" | "wake" = "off";
@@ -441,6 +461,11 @@ export class WhisperVoiceEngine {
         body: blob,
       });
       const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (data.rejected === "voice") {
+        // Voice lock: not the enrolled voice (TV, someone else) — ignore it.
+        noteHeard(`(ignored a voice that isn't yours — match ${Math.round((data.score ?? 0) * 100)}%)`, false);
+        return "";
+      }
       if (!data.error) {
         if (voiceDiag.error) diag({ error: "" });
         return data.text ?? "";
