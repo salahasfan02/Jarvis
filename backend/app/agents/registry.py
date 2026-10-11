@@ -89,8 +89,12 @@ register(Agent(
 register(Agent(
     id="files", name="File Agent",
     description="Finding, organizing, reading, moving or cleaning up files and folders.",
-    prompt="You are in file-management mode. Always list what you find before changing "
-           "anything, and summarize changes you make.",
+    prompt="You are in file-management mode. Act, don't ask: when the user wants a "
+           "file opened, sent or read and one file clearly matches (e.g. the newest), "
+           "do it straight away — open_file/send_file/read_document accept just a name "
+           "like \"CV\" and find it themselves. Only ask when several files match "
+           "equally. Before moving or deleting several files, list them first. "
+           "Summarize changes you make.",
     tool_tags=["files"]))
 
 register(Agent(
@@ -98,8 +102,9 @@ register(Agent(
     description="Reading, summarizing, drafting, sending and replying to email and messages.",
     prompt="You are in messaging mode. You can really read and send the user's email "
            "through Apple Mail — always do it with the tools, never just describe it.\n"
-           "- Send: if the user says SEND or \"email X to someone\", call send_email (they "
-           "approve the exact message first). Draft/write/prepare an email: call "
+           "- Send: if the user says SEND or \"email X to someone\", call send_email. It "
+           "shows the user the exact message and waits for their approval — so never "
+           "write the email out in your reply or ask \"shall I send it?\"; just call it. Draft/write/prepare an email: call "
            "draft_email. Never send a draft-only request.\n"
            "- Read / summarize: call read_emails (unread_only for 'new' mail), then give one "
            "line per email — sender, subject, the gist — and point out anything urgent or "
@@ -107,12 +112,14 @@ register(Agent(
            "mail from someone or about something.\n"
            "- Reply: find the email's id, then draft_reply, or send_reply when the user says "
            "send. Sign as the user.\n"
-           "- Attachments: pass the file name the user said (\"my CV\") or a path in "
-           "`attachments`; it is found on the Mac. If unsure which file, search_files first.\n"
+           "- Attachments: pass the file name the user said (\"CV\") or a path in "
+           "`attachments` — the tool finds it on the Mac. Never ask the user for a path "
+           "first; only if the tool says it can't find it.\n"
            "- New documents: to email a document that doesn't exist yet, write it with "
-           "create_word_document, then attach the path it returns.\n"           "- People: \"email Sam\" / \"my landlord\" — pass the name as `to`; it's looked "
-           "up in saved people and Contacts. When the user tells you someone's details or "
-           "relation, save them with remember_person.\n"
+           "create_word_document, then attach the path it returns.\n"           "- People: \"email Sam\" / \"my landlord\" — call the email tool right away with "
+           "the name as `to` (e.g. to=\"my landlord\"); the tool looks them up in saved "
+           "people and Contacts. Never ask for an address before trying. When the user "
+           "tells you someone's details or relation, save them with remember_person.\n"
            "iMessages can only be drafted — the user presses send.",
     tool_tags=["messaging", "email", "files"]))
 
@@ -140,6 +147,9 @@ register(Agent(
 # smarter than keywords ("drivers open YouTube" now lands on media). Keywords
 # remain as the fallback when no embedding model is available.
 _ROUTE_EXAMPLES: dict[str, list[str]] = {
+    "general": ["explain what a REST API is", "how does photosynthesis work",
+                "what does HTTP stand for", "tell me a joke", "write me a poem",
+                "what's the difference between RAM and storage"],
     "media": ["play some Drake", "pause the music", "skip this song",
               "put on a video on youtube", "resume playback", "play my playlist"],
     "vision": ["what's on my screen right now", "what am I looking at",
@@ -164,6 +174,7 @@ _ROUTE_EXAMPLES: dict[str, list[str]] = {
     "automation": ["open safari", "close spotify", "create a note about the meeting",
                    "set a reminder for 6pm", "what's on my calendar",
                    "copy this to my clipboard", "give me my daily briefing",
+                   "what tabs do I have open", "close the github tab",
                    "click on the sign in button", "press subscribe", "open my CV",
                    "open the report on my desktop"],
 }

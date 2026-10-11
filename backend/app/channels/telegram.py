@@ -575,7 +575,10 @@ class TelegramBot:
         attached = ""
         try:
             from ..knowledge import attachments
-            await attachments.ingest(conv_id, path.name, data)
+            # A photo's caption is usually the question ("what plant is this?"):
+            # let the vision model look for exactly that.
+            await attachments.ingest(conv_id, path.name, data,
+                                     question=(msg.get("caption") or "").strip())
             attached = " Its contents are attached to this conversation."
         except Exception:
             pass

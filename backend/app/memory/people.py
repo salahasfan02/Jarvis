@@ -53,8 +53,16 @@ def remember(name: str, relation: str = "", email: str = "", phone: str = "",
     """Add or update a person (matched by name, else by relation)."""
     _ensure()
     name, relation = name.strip(), relation.strip().lower()
-    existing = next((p for p in all_people() if p["name"].lower() == name.lower()
-                     or (relation and not name and p["relation"] == relation)), None)
+    # "my landlord" is a relation, not a name.
+    m = re.match(r"(?i)^(?:my|our|the)\s+(.+)$", name)
+    if m:
+        relation, name = relation or m.group(1).lower(), ""
+    everyone = all_people()
+    existing = next((p for p in everyone if name and p["name"].lower() == name.lower()), None)
+    if existing is None and relation:
+        # A placeholder saved by relation only ("Landlord") gets their real name later.
+        existing = next((p for p in everyone if p["relation"] == relation
+                         and (not name or p["name"].lower() == relation)), None)
     now = time.time()
     with db.connect() as conn:
         if existing:

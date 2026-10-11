@@ -212,6 +212,7 @@ _SAYS_DRAFT = re.compile(r"\b(draft|prepare|compose|write up)\b", re.I)
 _SAYS_SEND = re.compile(
     r"\b(send|shoot|fire off)\b[^.?!]*\b(e-?mails?|mail|reply|it)\b"
     r"|^\s*(?:please\s+|can you\s+|could you\s+)?e-?mail\s+\w"
+    r"|\b(?:and|then)\s+e-?mail\s+(?:it|this|that|them)\b"     # "...then email it to Sam"
     r"|\breply\b[^.?!]*\band send\b", re.I)
 
 
@@ -232,14 +233,42 @@ def _for_intent(user_content: str, tool_list: list[tools.Tool]) -> list[tools.To
 
 _CLAIMS_ACTION = re.compile(
     r"\b(?:i(?:'ve| have)?|i just)\s+(?:sent|drafted|emailed|replied|opened|created|"
-    r"scheduled|added|saved|moved|deleted|played|booked|set up|forwarded)\b"
-    r"|\bhas been (?:sent|drafted|created|scheduled|saved|added)\b", re.I)
+    r"scheduled|added|saved|moved|deleted|played|booked|set up|forwarded|found|located)\b"
+    r"|\bi(?:'m| am) (?:opening|sending|moving|deleting|playing)\b"
+    r"|\bi (?:found|can see you have)\b|\bhere are the files\b"
+    r"|\bhas been (?:sent|drafted|created|scheduled|saved|added|moved|deleted)\b", re.I)
 _ASKS_ACTION = re.compile(
     r"\b(send|e-?mail|draft|reply|forward|open|create|schedule|add|play|save|move|"
-    r"delete|book|remind|text)\b", re.I)
+    r"delete|book|remind|text|find|search|list|show|what tabs)\b", re.I)
+# Citing searches it never ran: never acceptable, whatever was asked.
+_FAKE_SOURCES = re.compile(r"\baccording to (?:recent |my |the )?(?:web )?search(?:es)?\b"
+                           r"|^\s*sources?:", re.I | re.M)
 _ASKS_ABOUT_PAST = re.compile(r"^\s*(did|have|has|was|were|is|are|why|when)\b", re.I)
-CLAIM_NUDGE = ("(You said you did that, but you didn't call any tool — so nothing actually "
-               "happened. Call the tool that does it now, or tell me plainly that you can't.)")
+CLAIM_NUDGE = ("(You answered as if you had done or looked something up, but you didn't "
+               "call any tool — so nothing happened and anything you 'found' is made up. "
+               "Call the tool that does it now, or tell me plainly that you can't.)")
+
+
+# A reply that ends by announcing an action it never took.
+_ANNOUNCES = re.compile(r"\b(?:let me|let[’']s|i[’']ll|i will|i[’']m going to|i am going to)\b"
+                        r"[^.?!]{0,80}(?:now|first|for you|right away)?[.!…:]?\s*$", re.I)
+# Stalling instead of acting: asking permission for what was already asked
+# (the tool shows its own confirmation), or asking for a path/address the
+# tools find themselves.
+_STALLS = re.compile(
+    r"\b(?:would you like me to|shall i|should i|do you want me to|want me to)\s+"
+    r"(?:go ahead and\s+)?(?:send|open|email|delete|move|create|draft|play|attach)\b"
+    r"|\b(?:could|can|would) you (?:please )?(?:provide|tell me|specify|share|give me|confirm)"
+    r"[^.?!]{0,40}\b(?:path|file ?name|location|email address|address|which file)\b"
+    r"|\bi need (?:the |your |its )?(?:file ?(?:path|name)|path|location|email address|"
+    r"address|name of the (?:file|document))\b"
+    r"|\b(?:just )?(?:give|send|tell) me (?:its|the|their) (?:location|path|name|address|email)\b",
+    re.I)
+STALL_NUDGE = ("(The user already asked for this, and the tool asks them to approve it "
+               "itself — don't ask in text. The tools find files and people by name, so "
+               "call the tool now with what the user said.)")
+INTENT_NUDGE = ("(You said you would do that, but you didn't call the tool. Call it now — "
+                "don't describe it.)")
 
 
 _FAIL_STARTS = ("error", "failed", "applescript error", "couldn't", "could not",
@@ -254,7 +283,9 @@ def _failed(output: str) -> bool:
 
 
 def _pretends(user_content: str, reply: str) -> bool:
-    """The reply claims an action the user asked for, though no tool ran."""
+    """The reply claims an action (or a search) though no tool ran."""
+    if _FAKE_SOURCES.search(reply):
+        return True
     return (bool(_ASKS_ACTION.search(user_content)) and not _ASKS_ABOUT_PAST.match(user_content)
             and bool(_CLAIMS_ACTION.search(reply)))
 
@@ -415,6 +446,7 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
     first_token_ms = None
     nudged = False
     claim_checked = False
+    intent_nudged = False
 
     try:
         round_no = 0
@@ -460,6 +492,25 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
                     llm_messages.append({"role": "assistant", "content": round_text})
                     llm_messages.append({"role": "user", "content": CLAIM_NUDGE})
                     full_response = ""
+                    continue
+                if (tool_schemas and not intent_nudged and round_text.strip()
+                        and _ASKS_ACTION.search(user_content) and _STALLS.search(round_text)
+                        and not any(re.search(r"ask (?:the user )?which|several", e["result"], re.I)
+                                    for e in tool_events)):
+                    intent_nudged = True
+                    audit.log("stall_nudged", agent=agent.id, reply=round_text[:200])
+                    llm_messages.append({"role": "assistant", "content": round_text})
+                    llm_messages.append({"role": "user", "content": STALL_NUDGE})
+                    full_response = full_response[:len(full_response) - len(round_text)]
+                    yield {"type": "reset_text", "content": full_response}
+                    continue
+                if (tool_schemas and not intent_nudged and round_text.strip()
+                        and _ANNOUNCES.search(round_text[-200:])):
+                    # "Let me find your CV files now." — and then nothing. Hold
+                    # it to what it just said it would do.
+                    intent_nudged = True
+                    llm_messages.append({"role": "assistant", "content": round_text})
+                    llm_messages.append({"role": "user", "content": INTENT_NUDGE})
                     continue
                 if full_response.strip() or nudged:
                     break

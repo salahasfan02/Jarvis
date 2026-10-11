@@ -62,7 +62,7 @@ def _extract_zip(data: bytes) -> str:
     return "\n".join(parts)
 
 
-async def _describe_image(data: bytes, name: str) -> str:
+async def _describe_image(data: bytes, name: str, question: str = "") -> str:
     parts = []
     # exact text via Apple Vision OCR
     try:
@@ -85,8 +85,11 @@ async def _describe_image(data: bytes, name: str) -> str:
             from ..llm import ollama_client
             description = await ollama_client.chat_once(
                 [{"role": "user",
-                  "content": "Describe this image thoroughly: contents, layout, "
-                             "any diagrams or UI elements, and anything notable.",
+                  "content": (f"The user asks about this image: {question}\nAnswer that "
+                              "precisely first, then briefly describe the rest of the image."
+                              if question else
+                              "Describe this image thoroughly: contents, layout, "
+                              "any diagrams or UI elements, and anything notable."),
                   "images": [base64.b64encode(data).decode()]}],
                 model=vision_model)
             if description:
@@ -96,10 +99,10 @@ async def _describe_image(data: bytes, name: str) -> str:
     return "\n\n".join(parts) or "(image uploaded — no text or description extracted)"
 
 
-async def ingest(conv_id: str, name: str, data: bytes) -> dict:
+async def ingest(conv_id: str, name: str, data: bytes, question: str = "") -> dict:
     suffix = Path(name).suffix.lower()
     if suffix in IMAGE_EXT:
-        text = await _describe_image(data, name)
+        text = await _describe_image(data, name, question)
         return db.add_attachment(conv_id, name, "image", text[:MAX_TEXT],
                                  image_b64=base64.b64encode(data).decode())
     if suffix == ".docx":

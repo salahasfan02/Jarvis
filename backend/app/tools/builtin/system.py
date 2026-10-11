@@ -219,9 +219,10 @@ async def camera_look(question: str = "Describe what you see.") -> str:
 
 @tool(
     name="search_documents",
-    description="Search the user's ingested documents (PDFs, notes, files added to the "
-                "knowledge base) and return the most relevant passages. Use whenever a "
-                "question might be answered by the user's own files.",
+    description="Search INSIDE the user's indexed documents (knowledge base) by meaning "
+                "and return the most relevant passages — for questions answered by what "
+                "their files SAY. To find a file by its name (\"find my tax return\"), use "
+                "search_files instead.",
     parameters={
         "type": "object",
         "properties": {"query": {"type": "string"}},
@@ -230,13 +231,19 @@ async def camera_look(question: str = "Describe what you see.") -> str:
 )
 async def search_documents(query: str) -> str:
     from ...knowledge import store as knowledge
+    from .documents import _spotlight
     results = await knowledge.search(query)
+    # Often the user means a FILE called that ("my tax return"): include name matches.
+    named = await asyncio.to_thread(_spotlight, query)
+    files = ("\n\nFiles whose names match:\n" + "\n".join(str(f) for f in named[:8])
+             if named else "")
     if not results:
-        return ("No matching passages. The knowledge base may be empty — the user can "
-                "add documents in the Memory page.")
+        return ("No matching passages in the indexed documents." + files if files else
+                "No matching passages, and no files with that name. (index_documents can "
+                "make a folder searchable.)")
     return "\n\n".join(
         f"[{r['document']}] (relevance {r['score']})\n{r['content'][:800]}"
-        for r in results)
+        for r in results) + files
 
 
 @tool(

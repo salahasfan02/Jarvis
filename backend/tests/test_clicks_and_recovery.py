@@ -59,3 +59,15 @@ def test_people_are_resolved_to_email_addresses(monkeypatch):
     assert (to, err) == (["tom@example.com"], "")
     to, cc, files, err = macos._email_parts("Nobody Known", "", None)
     assert "Not an email address" in err
+
+
+def test_relation_only_person_gets_their_name_later(monkeypatch):
+    from app.memory import people
+    monkeypatch.setattr(people, "from_contacts", lambda q: [])
+    for p in people.all_people():
+        people.forget(p["name"])
+    people.remember("my landlord", email="landlord@example.com")
+    people.remember("Tom Reed", relation="landlord", phone="0700")
+    found = people.known("landlord")
+    assert len(found) == 1 and found[0]["name"] == "Tom Reed"
+    assert found[0]["email"] == "landlord@example.com" and found[0]["phone"] == "0700"

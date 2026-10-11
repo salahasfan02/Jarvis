@@ -72,9 +72,10 @@ def _page_set(spec: str, total: int) -> list[int]:
 
 @tool(
     name="read_document",
-    description="Read the text of a PDF, Word, Excel, PowerPoint or text file on this Mac, "
+    description="Read the text of a PDF, Word, Excel, PowerPoint or text file for YOURSELF, "
                 "to summarize it, answer questions about it or quote it. Give a path or "
-                "just the name (\"the lease\", \"my CV\"). For long PDFs pass pages, e.g. '1-5'.",
+                "just the name (\"the lease\", \"my CV\"). For long PDFs pass pages, e.g. "
+                "'1-5'. To show a file to the user (\"open the lease\"), use open_file instead.",
     parameters={"type": "object", "properties": {
         "path": {"type": "string", "description": "file path or name"},
         "pages": {"type": "string", "description": "PDF pages, e.g. '1-3,8' (optional)"},

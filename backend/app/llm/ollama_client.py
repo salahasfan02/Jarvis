@@ -61,9 +61,14 @@ async def benchmark(model: str) -> dict:
     }
 
 
-def _options() -> dict[str, Any]:
+def _options(tools: bool = False) -> dict[str, Any]:
+    temperature = settings.get("ollama.temperature", 0.7)
+    if tools:
+        # Picking a tool and its arguments should be steady, not creative: at
+        # 0.7 the same request sometimes acted and sometimes asked a question.
+        temperature = min(temperature, settings.get("ollama.tool_temperature", 0.2))
     opts: dict[str, Any] = {
-        "temperature": settings.get("ollama.temperature", 0.7),
+        "temperature": temperature,
         "num_ctx": settings.get("ollama.num_ctx", 8192),
     }
     num_gpu = settings.get("ollama.num_gpu", -1)
@@ -116,8 +121,11 @@ async def chat_stream(messages: list[dict], model: str | None = None,
         "model": model or settings.get("ollama.model"),
         "messages": messages,
         "stream": True,
-        "options": _options(),
+        "options": _options(tools=bool(tools)),
         "keep_alive": settings.get("ollama.keep_alive", "5m"),
+        # Thinking models (qwen3.5…) would reason for many seconds before every
+        # reply; an assistant answering commands doesn't need that.
+        "think": bool(settings.get("ollama.think", False)),
     }
     if tools:
         payload["tools"] = tools
@@ -145,6 +153,9 @@ async def chat_once(messages: list[dict], model: str | None = None,
         "stream": False,
         "options": _options(),
         "keep_alive": settings.get("ollama.keep_alive", "5m"),
+        # Thinking models (qwen3.5…) would reason for many seconds before every
+        # reply; an assistant answering commands doesn't need that.
+        "think": bool(settings.get("ollama.think", False)),
     }
     if format:
         payload["format"] = format

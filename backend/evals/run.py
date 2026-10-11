@@ -56,7 +56,23 @@ def fake_output(name: str, args: dict) -> str:
             return f"2026-10-11 00:12  {FAKE_HOME}/Desktop/Screenshot 2026-10-11 at 00.12.04.png"
         if "tax" in q:
             return f"2026-04-02 09:00  {FAKE_HOME}/Documents/Tax_Return_2025.pdf"
+        for f in ("lease.pdf", "notes.txt"):
+            if f.split(".")[0] in q:
+                return f"2026-10-01 09:00  {FAKE_HOME}/Desktop/{f}"
         return "No files found."
+    if name == "ui_elements":
+        return ("Google Chrome — 6 controls:\n1. button 'Back'\n2. text field 'Search'\n"
+                "3. link 'Sign in'\n4. button 'Subscribe'\n5. link 'Home'\n6. button 'Menu'")
+    if name in ("find_person", "remember_person"):   # harmless: Jarvis's own (throwaway) data
+        from app.memory import people
+        if name == "remember_person":
+            return "Saved: " + people.describe(people.remember(**{k: v for k, v in args.items()
+                                                                  if k in ("name", "relation", "email", "phone", "notes")}))
+        found = people.known(args.get("query", ""))
+        return ("\n".join(people.describe(x) for x in found) if found else
+                f"I don't know anyone called '{args.get('query')}'. Ask the user for their details.")
+    if name in ("open_file", "read_document"):
+        return f"Opened {args.get('path')}" if name == "open_file" else "Lease: rent £1,200/month, 12 months."
     if name == "create_word_document":
         slug = re.sub(r"[^a-z0-9]+", "-", (args.get("title") or "document").lower()).strip("-")
         return (f"Created Word document '{args.get('title')}' at "
@@ -96,6 +112,15 @@ def fake_output(name: str, args: dict) -> str:
                 return "Error"
     if name == "current_datetime":
         return time.strftime("%A %d %B %Y, %H:%M")
+    if name == "search_documents":    # the real tool also lists files whose NAMES match
+        if "tax" in q:
+            return ("No matching passages in the indexed documents.\n\nFiles whose names "
+                    f"match:\n{FAKE_HOME}/Documents/Tax_Return_2025.pdf")
+        return "No matching passages, and no files with that name."
+    if name == "search_notes":
+        return "No matching notes."
+    if name == "send_file":
+        return f"Sent {args.get('path')} to the user's phone."
     if name == "daily_briefing":
         return "Briefing: 2 meetings today, 3 unread emails, sunny 18°C."
     return "Done."
@@ -156,6 +181,8 @@ async def run_case(case: dict, verbose: bool) -> dict:
 
     tools.execute = fake_execute
     from app.memory import people
+    for p in people.all_people():          # each case starts with only its own people
+        people.forget(p["name"])
     for person in case.get("people", []):
         people.remember(**person)
     conv = db.create_conversation()["id"]
@@ -239,7 +266,7 @@ async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", help="main chat model to test (default: your settings)")
     ap.add_argument("--utility", help="utility model (titles, memory capture)")
-    ap.add_argument("--only", help="run cases whose text contains this")
+    ap.add_argument("--only", help="run cases whose text contains this (a|b for several)")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--out", help="write JSON results here")
     a = ap.parse_args()
@@ -248,7 +275,8 @@ async def main() -> None:
     from app.config import settings
     from evals.cases import CASES
 
-    cases = [c for c in CASES if not a.only or a.only.lower() in c["say"].lower()]
+    picks = [s.strip().lower() for s in (a.only or "").split("|") if s.strip()]
+    cases = [c for c in CASES if not picks or any(s in c["say"].lower() for s in picks)]
     print(f"model {settings.get('ollama.model')} · {len(cases)} cases\n")
     results = []
     for case in cases:

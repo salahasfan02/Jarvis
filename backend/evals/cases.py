@@ -33,7 +33,8 @@ CASES = [
      "args": {"list_directory": {"path": "desktop"}}},
     {"say": "open my CV", "tools": ["open_file"], "args": {"open_file": {"path": "cv"}}},
     {"say": "open the lease pdf", "tools": ["open_file"], "args": {"open_file": {"path": "lease"}}},
-    {"say": "find my tax return", "tools": ["search_files"], "args": {"search_files": {"query": "tax"}}},
+    {"say": "find my tax return", "tools": [["search_files", "search_documents"]],
+     "args": {"search_files": {"query": "tax"}, "search_documents": {"query": "tax"}}},
     {"say": "what's my latest screenshot on the desktop", "tools": ["list_directory"],
      "args": {"list_directory": {"sort": "recent"}}},
     {"say": "make a folder on my desktop called Invoices", "tools": ["create_folder"],
@@ -59,6 +60,7 @@ CASES = [
     {"say": "write a report about electric cars as a word document", "tools": ["create_word_document"],
      "args": {"create_word_document": {"content": "(?s).{300,}"}}},
     {"say": "text John that I'm running late", "tools": ["draft_imessage"],
+     "people": [{"name": "John Smith", "phone": "+44 7700 900123"}],
      "args": {"draft_imessage": {"recipient": "john", "body": "late"}}},
 
     # --- calendar / reminders / notes -------------------------------------------------
