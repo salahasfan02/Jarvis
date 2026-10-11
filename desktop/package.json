@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "prepackage": "npm run build --prefix ../frontend && rm -rf renderer && cp -R ../frontend/dist renderer && mkdir -p ~/.jarvis && (cd ../backend && pwd) > ~/.jarvis/backend_path",
-    "package": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir"
+    "package": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir",
+    "install-app": "bash install-app.sh"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -15,7 +16,22 @@
   "build": {
     "appId": "com.jarvis.assistant",
     "productName": "Jarvis",
-    "files": ["main.cjs", "main-preload.cjs", "overlay.cjs", "quick-preload.cjs", "renderer/**/*"],
-    "mac": { "category": "public.app-category.productivity" }
+    "files": [
+      "main.cjs",
+      "main-preload.cjs",
+      "overlay.cjs",
+      "quick-preload.cjs",
+      "renderer/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": "dir",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Jarvis listens for its wake word and your voice commands.",
+        "NSCameraUsageDescription": "Jarvis looks through the camera when you ask it to.",
+        "NSAppleEventsUsageDescription": "Jarvis controls apps like Mail, Calendar, Music and your browser when you ask it to."
+      }
+    }
   }
 }

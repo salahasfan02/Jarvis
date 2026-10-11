@@ -264,7 +264,36 @@ ipcMain.handle("quick-capture-screen", async () => {
   return text;
 });
 
+// One Jarvis at a time: opening it again just brings the window forward.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow) return createMainWindow();
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
+// Every reply needs Ollama: start it if it isn't running (and is installed).
+function ensureOllama() {
+  http.get("http://127.0.0.1:11434/api/version", () => {})
+    .on("error", () => {
+      if (fs.existsSync("/Applications/Ollama.app")) spawn("open", ["-g", "-a", "Ollama"]);
+    });
+}
+
+// "Open Jarvis when I log in" (only meaningful for the installed app).
+ipcMain.handle("login-item", (_e, enabled) => {
+  if (typeof enabled === "boolean" && app.isPackaged) {
+    app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true });
+  }
+  return { packaged: app.isPackaged, enabled: app.getLoginItemSettings().openAtLogin };
+});
+
 app.whenReady().then(() => {
+  ensureOllama();
   startBackend();
   createMainWindow();
   createTray();

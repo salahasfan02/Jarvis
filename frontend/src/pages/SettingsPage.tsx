@@ -713,6 +713,8 @@ export function SettingsPage(props: {
           </Row>
         </div>
 
+        <LoginItem />
+
         <div className="panel">
           <h3>About you</h3>
           <div className="sub" style={{ marginBottom: 8 }}>
@@ -923,5 +925,23 @@ function VoiceLock(props: { onPatch: (p: any) => void }) {
         {msg && <div className="sub" style={{ color: score !== null && st.enrolled ? "var(--accent)" : undefined }}>{msg}</div>}
       </div>
     </Row>
+  );
+}
+
+
+/** "Open Jarvis when I log in" — only inside the installed Jarvis app. */
+function LoginItem() {
+  const bridge = (window as any).jarvisWindow;
+  const [state, setState] = useState<{ packaged: boolean; enabled: boolean } | null>(null);
+  useEffect(() => { bridge?.loginItem?.().then(setState).catch(() => {}); }, []);
+  if (!bridge?.loginItem || !state?.packaged) return null;
+  return (
+    <div className="panel">
+      <h3>Desktop app</h3>
+      <Row label="Open Jarvis when I log in" sub="Starts quietly in the background, ready for “Jarvis…”.">
+        <Toggle checked={state.enabled}
+                onChange={(v) => bridge.loginItem(v).then(setState).catch(() => {})} />
+      </Row>
+    </div>
   );
 }

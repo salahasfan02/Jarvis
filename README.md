@@ -179,7 +179,8 @@ The Electron shell is a **wrapper around the running stack**, not a standalone b
 
 cd desktop          # terminal 2
 npm install
-npm start           # or: npm run package  → builds Jarvis.app
+npm start           # run it from the repo, or:
+npm run install-app # build Jarvis.app, put it in Applications and open it
 ```
 
 The desktop app adds a menu-bar icon, the **⌥Space** quick command, a **⌘⇧J** floating window, and "Open at Login."
@@ -212,6 +213,12 @@ ollama pull llava              # camera & screen vision
 ```
 
 Then open **Settings** to enable them, download the offline **Whisper** and human **Kokoro** voice models, pick your theme, and set your wake word.
+
+### 🖥️ Install as a Mac app
+`cd desktop && npm run install-app` builds **Jarvis.app** (with its own icon), signs it locally and
+installs it in Applications. It starts Ollama if needed, only ever runs once, and can open at login
+(Settings → Desktop app). It's a new app to macOS, so allow the microphone, camera, Accessibility and
+Screen Recording once — **Setup check** lists anything still missing, with a fix button for each.
 
 ### 📱 Phone setup (Telegram)
 

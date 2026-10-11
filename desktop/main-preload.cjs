@@ -7,4 +7,6 @@ contextBridge.exposeInMainWorld("jarvisWindow", {
   dragStart: () => ipcRenderer.send("window-drag", "start"),
   dragEnd: () => ipcRenderer.send("window-drag", "end"),
   toggleZoom: () => ipcRenderer.send("window-drag", "zoom"),
+  // "Open Jarvis when I log in": pass true/false to change, nothing to read.
+  loginItem: (enabled) => ipcRenderer.invoke("login-item", enabled),
 });
