@@ -328,7 +328,18 @@ export default function App() {
     const opts = {
       language: "en-US",
       wakeWords: settingsRef.current?.assistant?.wake_words ?? ["jarvis"],
-      onTranscript: (text: string) => { lastInputWasVoice.current = true; sendRef.current(text); },
+      onTranscript: (text: string) => {
+        // "Stop" / "cancel": the emergency stop — halt clicking/typing and
+        // the running reply, don't send it as a new request.
+        if (/^\s*(?:(?:jarvis|hey jarvis)[\s,]+)?(?:stop|cancel|abort|stop it|stop that|stop now)[\s.!]*$/i.test(text)) {
+          stopSpeaking();
+          socket.stop();
+          fetch(`${API}/screen/stop`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ reason: "voice" }) }).catch(() => {});
+          return;
+        }
+        lastInputWasVoice.current = true; sendRef.current(text);
+      },
       onInterim: setInterim,
       onWake: () => {
         stopSpeaking();

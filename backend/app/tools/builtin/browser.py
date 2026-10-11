@@ -12,6 +12,7 @@ browser setting; the tools return exact instructions when it's disabled:
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import urllib.parse
 
@@ -194,19 +195,38 @@ def browser_js(javascript: str, tab_index: int = 0) -> str:
 
 @tool(
     name="browser_close_tab",
-    description="Close a browser tab by index (from browser_tabs).",
+    description="Close a browser tab by what's in it — site or title words (\"github\", "
+                "\"gmail\", \"the youtube tab\") — or by its number from browser_tabs.",
     parameters={
         "type": "object",
-        "properties": {"tab_index": {"type": "integer"}},
-        "required": ["tab_index"],
+        "properties": {
+            "tab": {"type": "string", "description": "site/title words, e.g. github"},
+            "tab_index": {"type": "integer", "description": "tab number, if known"},
+        },
     },
     risk="confirm",
     agent_tags=["automation", "browser"],
 )
-def browser_close_tab(tab_index: int) -> str:
+def browser_close_tab(tab: str = "", tab_index: int = 0) -> str:
     browser = context.browser_name()
+    tabs = context.list_tabs(browser)
+    if tab and not tab_index:
+        words = [w for w in re.findall(r"[a-z0-9.]+", tab.lower())
+                 if w not in ("the", "tab", "tabs", "close", "my", "page")]
+        hits = [t for t in tabs if words and all(
+            w in (t["title"] + " " + t["url"]).lower() for w in words)]
+        if not hits:
+            listing = "\n".join(f"{t['index']}. {t['title'][:60]}" for t in tabs)
+            return f"No open tab matches '{tab}'. Open tabs:\n{listing}"
+        if len(hits) > 1:
+            listing = "\n".join(f"{t['index']}. {t['title'][:60]}" for t in hits)
+            return f"Several tabs match '{tab}' — ask which, then pass tab_index:\n{listing}"
+        tab_index = hits[0]["index"]
+    if not tab_index:
+        return "Say which tab to close (its site or title)."
+    title = next((t["title"] for t in tabs if t["index"] == tab_index), f"tab {tab_index}")
     ok, err = _osascript(f'tell application "{browser}" to close tab {tab_index} of front window')
-    return f"Closed tab {tab_index}." if ok else f"Failed: {err}"
+    return f"Closed '{title[:60]}'." if ok else f"Failed: {err}"
 
 
 # --- YouTube agent -------------------------------------------------------------

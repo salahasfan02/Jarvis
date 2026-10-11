@@ -482,8 +482,12 @@ export class WhisperVoiceEngine {
 
   private onWakeText(text: string) {
     if (this.awaitingCommand) {
+      // Just the wake word again ("Jarvis?") isn't a command: keep listening.
+      const again = findWake(text, this.opts.wakeWords);
+      if (again && !again.command) return;
       this.endCommandWindow();
-      if (text) this.opts.onTranscript(text);
+      if (again?.command) this.opts.onTranscript(again.command);
+      else if (text) this.opts.onTranscript(text);
       return;
     }
     const match = findWake(text, this.opts.wakeWords);

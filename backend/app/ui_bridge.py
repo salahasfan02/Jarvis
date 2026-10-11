@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager, contextmanager
 # ---- screen activity --------------------------------------------------------
 
 LABELS = {
-    "controlling": "Jarvis is controlling your screen",
+    "controlling": "Jarvis is controlling your screen — press Esc to stop",
     "reading": "Jarvis is reading your screen",
     "watching": "Jarvis is watching your screen",
 }
@@ -86,6 +86,39 @@ def set_watching(count: int) -> None:
 def is_overlay_text(line: str) -> bool:
     """The frame's own label must never be read back as screen content."""
     return line.strip() in LABELS.values()
+
+
+# ---- emergency stop -----------------------------------------------------------
+# Esc (while the frame is up) or "Jarvis stop" halts all screen control: the
+# running chat turn is cancelled, and control tools refuse for a few seconds
+# so a model mid-plan can't carry on clicking.
+
+_abort_until = 0.0
+_tasks: set = set()
+
+
+def stop_control(reason: str = "Esc") -> int:
+    """Cancel every running turn and block screen control briefly."""
+    global _abort_until
+    _abort_until = time.time() + 5
+    cancelled = 0
+    for task in list(_tasks):
+        if not task.done():
+            task.cancel()
+            cancelled += 1
+    from .security import audit
+    audit.log("screen_control_stopped", reason=reason, cancelled=cancelled)
+    return cancelled
+
+
+def control_blocked() -> bool:
+    return time.time() < _abort_until
+
+
+def track(task) -> None:
+    """Register a running chat turn so stop_control can cancel it."""
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
 
 
 # ---- UI requests --------------------------------------------------------------

@@ -611,6 +611,8 @@ class TelegramBot:
             await self._run_turn(chat_id, conv_id, text, voice_in)
 
     async def _run_turn(self, chat_id: int, conv_id: str, text: str, voice_in: bool) -> None:
+        from .. import ui_bridge
+        ui_bridge.track(asyncio.current_task())   # the emergency stop can cancel it
         session = TelegramSession(self, chat_id)
         token = current.set(session)
         typing = asyncio.create_task(self._keep_typing(chat_id))

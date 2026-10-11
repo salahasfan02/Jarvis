@@ -118,9 +118,14 @@ def prompt_block(conv_id: str) -> str:
     attachments = db.list_attachments(conv_id, with_content=True)
     if not attachments:
         return ""
-    budget = 24000
-    parts = ["The user has attached these files to this conversation:"]
+    # This rides along on EVERY message of the conversation (prompt tokens =
+    # seconds of reading), so: the latest few files, and an excerpt of each.
+    # read_document fetches the full text when a question needs it.
+    attachments = sorted(attachments, key=lambda a: a.get("created_at", 0))[-4:]
+    budget = 12000
+    parts = ["The user has attached these files to this conversation (excerpts — "
+             "read_document gives the full text):"]
     for att in attachments:
         chunk = att["content_text"][: max(1500, budget // len(attachments))]
         parts.append(f"\n=== ATTACHMENT: {att['name']} ({att['kind']}) ===\n{chunk}")
-    return "\n".join(parts)[:26000]
+    return "\n".join(parts)[:13000]

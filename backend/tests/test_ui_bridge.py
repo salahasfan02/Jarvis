@@ -31,7 +31,7 @@ def test_controlling_wins_over_reading_and_watching(monkeypatch):
     with ui_bridge.screen_activity_sync("controlling"):
         ui_bridge._active["reading"] += 1
         assert ui_bridge.current() == {"mode": "controlling",
-                                       "label": "Jarvis is controlling your screen"}
+                                       "label": "Jarvis is controlling your screen — press Esc to stop"}
 
 
 def test_overlay_label_is_not_screen_content():
@@ -53,3 +53,21 @@ def test_camera_request_gets_the_windows_answer():
     ui_bridge.register(FakeWindow())
     reply = asyncio.run(ui_bridge.request("camera_frame", timeout=2))
     assert reply == {"image": "data:image/jpeg;base64,AAAA"}
+
+
+def test_emergency_stop_cancels_turns_and_blocks_control():
+    async def scenario():
+        async def long_turn():
+            await asyncio.sleep(30)
+        task = asyncio.create_task(long_turn())
+        ui_bridge.track(task)
+        await asyncio.sleep(0)
+        assert ui_bridge.stop_control("test") == 1
+        await asyncio.sleep(0)
+        return task.cancelled()
+    assert asyncio.run(scenario())
+    assert ui_bridge.control_blocked()
+    from app.tools.builtin import control
+    # Blocked: refuses before posting any key (never post real keys in tests).
+    assert "emergency stop" in asyncio.run(control.press_keys("cmd+t"))
+    ui_bridge._abort_until = 0

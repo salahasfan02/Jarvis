@@ -41,3 +41,13 @@ def _no_background_llm(monkeypatch):
 
     monkeypatch.setattr(ollama_client, "chat_once", chat_once)
     monkeypatch.setattr(ollama_client, "embed", embed)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_input(monkeypatch):
+    """Tests must never press keys or click on the real Mac."""
+    try:
+        import Quartz
+    except ImportError:
+        return
+    monkeypatch.setattr(Quartz, "CGEventPost", lambda *a, **k: None)

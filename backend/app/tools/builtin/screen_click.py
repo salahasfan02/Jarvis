@@ -127,6 +127,9 @@ def screen_click(target: str, occurrence: int = 1, double: bool = False) -> str:
     """Find `target` text on screen and click it (blocking)."""
     if not target.strip():
         return "Say what to click (the text on the button or link)."
+    from ...ui_bridge import control_blocked
+    if control_blocked():
+        return "Stopped — the user pressed the emergency stop. Don't continue."
     if not _accessibility_ok():
         return ("I can see the screen but macOS won't let me click yet. Ask the user to "
                 f"allow Jarvis (or the Terminal running it) in {_PERMS} → Accessibility, "

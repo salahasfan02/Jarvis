@@ -69,24 +69,28 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 <td width="50%" valign="top">
 
 ### 🎙️ Voice
-- Wake word (*"Jarvis…"*) with an audible chime
-- **Offline speech recognition** (Whisper) — works in any browser
+- Wake word (*"Jarvis…"*) with an audible chime — robust to room noise, no phantom wakes
+- **Offline speech recognition** (Whisper `small.en`) — works in any browser
+- Say *"stop"* any time to halt what it's doing
 - **Human-sounding neural voices** (Kokoro TTS)
 - Sentence-streaming replies (talks as it thinks)
 - Conversation mode — reply without repeating the wake word
 
 ### 👁️ Vision
 - Read the **exact text** on your screen (Apple Vision OCR)
-- **Live camera** — ask about what it sees
+- **Live camera** — *"open the camera and tell me what you see"*
+- **You always know** — a glowing frame surrounds your screen whenever Jarvis reads or controls it
 - **Screen watch** — "tell me when the download finishes"
 - **Screen memory** — auto-journals what you're working on
 
 ### 🦾 Mac Automation
-- Open/close apps, control windows, notifications, clipboard
-- **Browser agent** — reuses your tabs, never spams windows
+- **Full control of any app** — presses buttons (even icon-only ones) by name through macOS Accessibility, fills in fields, types, keyboard shortcuts, scrolls and drags · **Esc** is the emergency stop
+- Open apps and **files by name** (*"open my CV"*), control windows, notifications, clipboard
+- **Browser agent** — clicks links and buttons on any page, closes tabs by name, reuses your tabs
 - Play **YouTube** & **Apple Music**, manage playlists
 - **Calendar** — *"what's on my calendar tomorrow?"* (all calendars, repeating events included) · **Notes, Reminders** — read and create
-- **Email** — *"summarize my emails"*, *"any new mail from Sam?"*, reply to one, draft, or send when you say *send* (you approve every email first) · draft iMessages
+- **Email** — *"summarize my emails"*, *"any new mail from Sam?"*, reply, draft, or send with attachments by name (*"email my CV to…"*); you approve every email first · draft iMessages
+- **Knows your people** — *"email my landlord"* finds them in Jarvis's memory or your Contacts
 
 </td>
 <td width="50%" valign="top">
@@ -100,7 +104,8 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 ### 🧠 Memory & Knowledge
 - **Long-term memory** — remembers your preferences & projects
 - **Auto-capture** — learns facts as you talk (toggleable)
-- **Document RAG** — drop in PDFs/Word/Excel and ask about them
+- **Document RAG** — drop in PDFs/Word/Excel, or index a whole folder, and search it by meaning
+- **Documents** — read & compare PDFs/Word, create **Word, Excel and PowerPoint** files, fill in PDF forms, then email or send them
 - **Projects** — per-project memory across conversations
 
 ### 🕵️ Research
@@ -113,6 +118,8 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Custom Skills** — save prompts, invoke with `/name`, import/export
 - **Self-improving** — logs what it can't do and can write its own tools
 - **Multi-model** — assign models per task, benchmark them
+- **Fast by design** — only the tools a request needs go into the prompt, so even a 14B model answers quickly
+- **Built-in eval suite** — 50+ real requests replayed against fake tools to check every model change
 - **Instant commands** — *"open YouTube"*, *"open Safari"*, *"pause"* run in well under a second, no model needed
 
 </td>
@@ -327,6 +334,8 @@ Modular by design — new tools, agents, models, and integrations drop in withou
 PRs, ideas, and bug reports are welcome. Jarvis is designed to be extended — writing a new tool or plugin is a few lines of Python (see [`docs/architecture.md`](docs/architecture.md)).
 
 Run the backend tests (any OS, no Ollama needed): `cd backend && .venv/bin/pip install pytest && .venv/bin/python -m pytest`
+
+Check how well a model handles real requests (needs Ollama; tools are faked, nothing on your Mac is touched): `cd backend && .venv/bin/python -m evals.run --model qwen2.5:14b` — prints pass/fail and timing for 50+ requests like *"email my CV to…"* and *"close the github tab"*.
 
 ## ⭐ Star it
 

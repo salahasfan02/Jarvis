@@ -328,6 +328,18 @@ def _email_parts(to: str, cc: str, attachments: list[str] | None
     to_list, cc_list = _addresses(to), _addresses(cc)
     if not to_list:
         return [], [], [], "No recipient given."
+    # "Sam" / "my landlord" -> their saved (or Contacts) address.
+    from ...memory import people
+    for lst in (to_list, cc_list):
+        for i, who in enumerate(lst):
+            if _EMAIL.fullmatch(who):
+                continue
+            email, options = people.resolve_email(who)
+            if email:
+                lst[i] = email
+            elif options:
+                return [], [], [], (f"Several people could be '{who}' — ask the user which:\n"
+                                    + "\n".join(people.describe(o) for o in options[:6]))
     bad = [a for a in to_list + cc_list if not _EMAIL.fullmatch(a)]
     if bad:
         return [], [], [], (f"Not an email address: {', '.join(bad)}. Find the address "
@@ -361,7 +373,8 @@ def resolve_attachments(attachments: list[str] | str | None) -> tuple[list[Path]
 _EMAIL_PARAMS = {
     "type": "object",
     "properties": {
-        "to": {"type": "string", "description": "email address(es), comma-separated"},
+        "to": {"type": "string", "description": "email address(es), comma-separated — or "
+                                         "a saved person's name/relation (\"Sam\", \"my landlord\")"},
         "subject": {"type": "string"},
         "body": {"type": "string", "description": "plain-text body, signed with the "
                                                   "user's name (no placeholders)"},

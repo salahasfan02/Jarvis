@@ -6,14 +6,14 @@
  * /api/screen/activity; this polls it and shows/hides click-through overlay
  * windows that sit above everything, including full-screen apps.
  */
-const { BrowserWindow, screen } = require("electron");
+const { BrowserWindow, globalShortcut, screen } = require("electron");
 const http = require("http");
 
 const POLL_MS = 200;
 const COLORS = {
   reading: "0, 255, 102",      // Jarvis green
   watching: "0, 200, 255",     // calm blue: a long-running watch
-  controlling: "255, 160, 0",  // amber: it is moving your mouse
+  controlling: "255, 160, 0",  // amber: it is moving your mouse (Esc stops it)
 };
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -57,6 +57,22 @@ function makeOverlay(display, primary) {
   return win;
 }
 
+// Esc is the emergency stop, but only while Jarvis is controlling the screen
+// (a global Esc at any other time would steal it from every app).
+function setEscape(active) {
+  const has = globalShortcut.isRegistered("Escape");
+  if (active && !has) {
+    globalShortcut.register("Escape", () => {
+      const req = http.request({ host: "127.0.0.1", port: 8765, path: "/api/screen/stop",
+                                 method: "POST", headers: { "Content-Type": "application/json" } });
+      req.on("error", () => {});
+      req.end(JSON.stringify({ reason: "Esc" }));
+    });
+  } else if (!active && has) {
+    globalShortcut.unregister("Escape");
+  }
+}
+
 function show(mode, label) {
   if (!overlays.length || overlays.some((w) => w.isDestroyed())) {
     hide(true);
@@ -73,6 +89,7 @@ function show(mode, label) {
     else apply();
   }
   shownMode = mode;
+  setEscape(mode === "controlling");
 }
 
 function hide(destroy = false) {
@@ -82,6 +99,7 @@ function hide(destroy = false) {
   }
   if (destroy) overlays = [];
   shownMode = null;
+  setEscape(false);
 }
 
 function poll() {

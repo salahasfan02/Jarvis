@@ -32,7 +32,7 @@ from ..memory import store as memory_store
 from ..security import audit
 from ..security.permissions import confirmations
 from ..tools import base as tools
-from . import quick
+from . import quick, toolpick
 
 SMART_WINDOW_RULES = """Smart context rules (IMPORTANT):
 - Before opening any website, check the open tabs (they are listed above, or
@@ -160,6 +160,16 @@ def _history_to_llm(history: list[dict]) -> list[dict]:
                             for c in calls)
             msgs.append({"role": "assistant", "content": m["content"]})
     return msgs
+
+
+def _recent_tools(history: list[dict], turns: int = 2) -> set[str]:
+    """Tools the last few replies used — kept on offer for follow-ups."""
+    names: set[str] = set()
+    replies = [m for m in history if m["role"] == "assistant"][-turns:]
+    for m in replies:
+        names.update(c.get("name") for c in (m.get("meta") or {}).get("tools") or []
+                     if c.get("name"))
+    return names
 
 
 def _short_title(text: str) -> str:
@@ -394,6 +404,8 @@ async def run_chat(conversation_id: str, user_content: str) -> AsyncIterator[dic
 
     use_tools = settings.get("tools.enabled", True)
     tool_list = _for_intent(user_content, _tools_for(agent)) if use_tools else []
+    # Only the tools this message needs: every schema costs prompt tokens.
+    tool_list = await toolpick.select(user_content, tool_list, _recent_tools(history))
     tool_schemas = [t.to_ollama() for t in tool_list] or None
 
     full_response = ""
@@ -615,7 +627,10 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
                 f"CURRENT STEP ({index + 1}/{len(steps)}): {step}\n"
                 f"Complete only this step now."},
         ], _dynamic_block(memories, ctx))
-        schemas = [t.to_ollama() for t in tool_list] or None
+        # The planner may use any tool, but each step only needs a few.
+        step_tools = await toolpick.select(step, tool_list,
+                                           {e["name"] for e in tool_events if e.get("name")})
+        schemas = [t.to_ollama() for t in step_tools] or None
         step_text = ""
         # The duplicate-call guard is per step: a later step may legitimately
         # repeat an earlier call (e.g. read the screen again).
@@ -642,7 +657,7 @@ async def _run_plan(conversation_id: str, goal: str, agent: agents.Agent,
                     if chunk.get("done"):
                         break
                 if not tool_calls and use_tools:
-                    recovered = text_tool_call(round_text, tool_list)
+                    recovered = text_tool_call(round_text, step_tools)
                     if recovered:
                         audit.log("text_tool_call_recovered",
                                   tool=recovered["function"]["name"], text=round_text[:200])

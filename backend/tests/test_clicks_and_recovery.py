@@ -46,3 +46,16 @@ def test_click_matching_prefers_the_exact_label():
     assert exact > inside_button > inside_prose > 0
     assert screen_click._score("Sing in", "sign in") > 0         # OCR slip
     assert screen_click._score("Subscribe", "sign in") == 0
+
+
+def test_people_are_resolved_to_email_addresses(monkeypatch):
+    from app.memory import people
+    from app.tools.builtin import macos
+    monkeypatch.setattr(people, "from_contacts", lambda q: [])
+    people.remember("Tom Reed", relation="landlord", email="tom@example.com")
+    assert people.resolve_email("my landlord") == ("tom@example.com", [])
+    assert people.resolve_email("Tom")[0] == "tom@example.com"
+    to, cc, files, err = macos._email_parts("my landlord", "", None)
+    assert (to, err) == (["tom@example.com"], "")
+    to, cc, files, err = macos._email_parts("Nobody Known", "", None)
+    assert "Not an email address" in err

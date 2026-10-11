@@ -69,8 +69,10 @@ register(Agent(
                 "reminders, calendar, clipboard, windows.",
     prompt="You are in automation mode. Use the macOS tools to act on the user's behalf. "
            "Reuse existing tabs, windows and sessions — never duplicate them. "
-           "You CAN click: to press a button or link on a web page use browser_click, "
-           "anywhere else on screen use click_on_screen — never say you can't click. "
+           "You CAN fully control the Mac — never say you can't. Web page buttons/links: "
+           "browser_click. Any app: ui_press (buttons, icons, menu items by label), "
+           "ui_type (fill a field or type), press_keys (shortcuts like cmd+t), scroll, "
+           "drag; ui_elements lists what an app's window contains when unsure. "
            "To open a document or folder on the Mac use open_file. "
            "Confirm what you did after each action.",
     tool_tags=["automation", "files", "browser", "music", "notes", "calendar"]))
@@ -108,7 +110,9 @@ register(Agent(
            "- Attachments: pass the file name the user said (\"my CV\") or a path in "
            "`attachments`; it is found on the Mac. If unsure which file, search_files first.\n"
            "- New documents: to email a document that doesn't exist yet, write it with "
-           "create_word_document, then attach the path it returns.\n"
+           "create_word_document, then attach the path it returns.\n"           "- People: \"email Sam\" / \"my landlord\" — pass the name as `to`; it's looked "
+           "up in saved people and Contacts. When the user tells you someone's details or "
+           "relation, save them with remember_person.\n"
            "iMessages can only be drafted — the user presses send.",
     tool_tags=["messaging", "email", "files"]))
 
@@ -149,7 +153,9 @@ _ROUTE_EXAMPLES: dict[str, list[str]] = {
                "debug this function for me", "explain this error message",
                "refactor my code", "generate unit tests for this class"],
     "files": ["organize the files on my desktop", "find my tax pdf in downloads",
-              "move these screenshots into a folder", "rename all the photos"],
+              "move these screenshots into a folder", "rename all the photos",
+              "what's my latest screenshot on the desktop", "open my CV",
+              "open the lease pdf", "find my tax return"],
     "messaging": ["draft an email to my professor", "text John that I'm late",
                   "summarize my emails", "do I have any new email",
                   "reply to Sam's email", "send an email to my landlord",
@@ -269,11 +275,13 @@ async def route(user_message: str) -> Agent:
 
 
 def _keyword_best(lower: str) -> str | None:
+    import re
     best_id, best_score = None, 0
     for agent_id, words in _ROUTE_KEYWORDS.items():
         if agent_id not in AGENTS:
             continue
-        score = sum(1 for w in words if w in lower)
+        # whole words: "screen" must not fire on "screenshot"
+        score = sum(1 for w in words if re.search(rf"\b{re.escape(w)}\b", lower))
         if score > best_score:
             best_id, best_score = agent_id, score
     return best_id

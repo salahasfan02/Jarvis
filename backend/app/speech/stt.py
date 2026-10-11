@@ -112,6 +112,13 @@ def _bias_kwargs(model, hint: str) -> dict:
     return {"initial_prompt": hint}
 
 
+def _phantom(seg) -> bool:
+    """Whisper inventing words from noise. Measured: real (even noisy) speech
+    scored avg_logprob >= -0.71; invented "Computer, Assistant," -1.56 to -1.80,
+    always with no_speech_prob around 0.55."""
+    return seg.avg_logprob < -1.2 and seg.no_speech_prob > 0.4
+
+
 async def transcribe(audio: bytes, hint: str = "") -> dict:
     """Transcribe an audio blob (webm/ogg/wav/m4a — PyAV decodes them all).
     `hint`: words to expect, e.g. the wake words."""
@@ -132,13 +139,16 @@ async def transcribe(audio: bytes, hint: str = "") -> dict:
             io.BytesIO(audio),
             language=lang if lang != "auto" else None,
             beam_size=1,
-            # The mic segmenter already cuts clips to speech; Whisper's own VAD
-            # on top trimmed the start of "Jarvis, open YouTube" in tests.
-            vad_filter=False,
+            # Without VAD, breaths and fan noise came back as the expected
+            # words ("Computer, Assistant,") and reached the chat as commands.
+            # Generous padding keeps the start of "Jarvis".
+            vad_filter=True,
+            vad_parameters={"threshold": 0.3, "speech_pad_ms": 600,
+                            "min_speech_duration_ms": 100},
             condition_on_previous_text=False,
             **_bias_kwargs(model, hint),
         )
-        text = " ".join(seg.text.strip() for seg in segments).strip()
+        text = " ".join(seg.text.strip() for seg in segments if not _phantom(seg)).strip()
         return {"text": text, "language": info.language,
                 "seconds": round(time.time() - started, 2)}
 

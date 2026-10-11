@@ -543,6 +543,12 @@ def telegram_unpair(user_id: int):
 
 # --- screen activity frame -------------------------------------------------------
 
+@router.post("/screen/stop")
+async def screen_stop(body: dict | None = None):
+    """Emergency stop: Esc while the frame is up, or "Jarvis stop"."""
+    return {"cancelled": ui_bridge.stop_control((body or {}).get("reason", "Esc"))}
+
+
 @router.get("/screen/activity")
 async def screen_activity():
     """Polled by the desktop app to draw a frame while Jarvis reads/controls the screen."""
@@ -812,6 +818,7 @@ async def ws_chat(ws: WebSocket):
                                mode=msg.get("mode", "chat"))["id"])
                 await ws.send_json({"type": "conversation", "conversation_id": conv_id})
                 current_task = asyncio.create_task(run(conv_id, msg.get("content", "")))
+                ui_bridge.track(current_task)
 
             elif mtype == "confirm":
                 confirmations.resolve(msg.get("id", ""), bool(msg.get("approved")))

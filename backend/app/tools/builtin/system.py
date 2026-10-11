@@ -486,8 +486,9 @@ async def stop_screen_memory() -> str:  # cancels a task (loop-only)
 @tool(
     name="remember",
     description="Save a fact to long-term memory so it persists across conversations. "
-                "Use when the user shares preferences, projects, contacts, goals, or "
-                "says 'remember that...'.",
+                "Use when the user shares preferences, projects, goals, or says "
+                "'remember that...'. For a PERSON's email/phone/relation use "
+                "remember_person instead.",
     parameters={
         "type": "object",
         "properties": {
