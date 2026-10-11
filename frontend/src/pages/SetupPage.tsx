@@ -41,11 +41,13 @@ async function mediaCheck(kind: "camera" | "microphone"): Promise<Check> {
 
 export function SetupPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [checks, setChecks] = useState<Check[] | null>(null);
+  const [grantTo, setGrantTo] = useState("");
   const [busy, setBusy] = useState("");
   const [notes, setNotes] = useState<Record<string, string>>({});
 
   const load = async () => {
     const res = await fetch(`${API}/setup/check`).then((r) => r.json()).catch(() => ({ checks: [] }));
+    setGrantTo(res.grant_to ?? "");
     const media = await Promise.all([mediaCheck("microphone"), mediaCheck("camera")]);
     setChecks([...(res.checks as Check[]), ...media]);
   };
@@ -95,6 +97,14 @@ export function SetupPage({ onOpenSettings }: { onOpenSettings: () => void }) {
             : `${problems} thing${problems > 1 ? "s" : ""} need${problems > 1 ? "" : "s"} your attention.`}
           <button className="btn" onClick={() => { setChecks(null); load(); }}><RefreshCw /> Re-check</button>
         </div>
+        {grantTo && (
+          <div className="panel" style={{ fontSize: 14 }}>
+            macOS gives permissions to the app that started Jarvis — right now that's{" "}
+            <b>{grantTo}</b>. In System Settings, switch on <b>{grantTo}</b>
+            {grantTo !== "Jarvis" && <> (there's no “Jarvis” entry until Jarvis is installed as an
+              app: <code>cd desktop &amp;&amp; npm run install-app</code>)</>}.
+          </div>
+        )}
         {checks && GROUPS.map(([title, belongs]) => {
           const rows = checks.filter((c) => !placed.has(c.id) && belongs(c));
           rows.forEach((c) => placed.add(c.id));

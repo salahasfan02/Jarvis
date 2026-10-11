@@ -86,6 +86,37 @@ def _installed(bundle: str) -> bool:
     return bool(r.stdout.strip())
 
 
+# ---- which app the permissions belong to ------------------------------------------
+
+def responsible_app() -> str:
+    """The name to look for in System Settings. macOS gives permissions to
+    the app that started Jarvis: "Jarvis" for the installed app, "Terminal"
+    (or iTerm, VS Code…) when it was started with npm start / start.sh."""
+    import os
+    pid = os.getpid()
+    for _ in range(12):
+        try:
+            out = subprocess.run(["ps", "-o", "ppid=,comm=", "-p", str(pid)], capture_output=True,
+                                 text=True, timeout=5).stdout.strip()
+        except subprocess.TimeoutExpired:
+            break
+        if not out:
+            break
+        ppid_s, _, path = out.partition(" ")
+        path = path.strip()
+        if "Jarvis.app/" in path:
+            return "Jarvis"
+        if "/disclaimer" in path:          # started on its own behalf (e.g. by a tool)
+            return "python3.12"
+        if ".app/Contents/MacOS/" in path and "Python.app" not in path \
+                and "Electron" not in path:
+            return path.split(".app/Contents/MacOS/")[0].rsplit("/", 1)[-1]
+        pid = int(ppid_s or 1)
+        if pid <= 1:
+            break
+    return "python3.12"
+
+
 # ---- individual checks -------------------------------------------------------------
 
 def _item(cid: str, name: str, why: str, status: str, detail: str = "",
@@ -260,7 +291,8 @@ async def run_all() -> dict:
                                               _full_disk(), *_automation()])
     checks += system + await asyncio.to_thread(_voice) + [_phone()]
     problems = sum(c["status"] in ("missing", "ask") for c in checks)
-    return {"checks": checks, "problems": problems, "checked_at": time.time()}
+    owner = await asyncio.to_thread(responsible_app)
+    return {"checks": checks, "problems": problems, "checked_at": time.time(), "grant_to": owner}
 
 
 # ---- fixes ---------------------------------------------------------------------------
