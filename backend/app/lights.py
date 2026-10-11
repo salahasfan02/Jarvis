@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -99,7 +100,7 @@ async def connect_account(email: str, password: str, timeout: int = 6) -> list[d
     a key for each. The password itself is never stored."""
     from kasa import AuthenticationError, Credentials, Discover
     creds = Credentials(email.strip(), password)
-    found = await Discover.discover(credentials=creds, timeout=timeout)
+    found = await _discover(credentials=creds, timeout=timeout)
     lights, rejected, failed = [], 0, []
     for host, dev in found.items():
         if _kind(dev) not in LIGHT_TYPES:
@@ -132,9 +133,42 @@ async def connect_account(email: str, password: str, timeout: int = 6) -> list[d
                 "(Me → Tapo Lab, or Me → Third-Party Services) and try again.")
         if failed:
             raise LightsError("Found your light but couldn't connect — " + "; ".join(failed))
-        raise LightsError("No Tapo or Kasa lights answered on this Wi-Fi network.")
+        raise LightsError("No Tapo or Kasa lights answered on this Wi-Fi network. If your light "
+                          "works in the Tapo app, macOS may be keeping Jarvis off your Wi-Fi: "
+                          "turn Jarvis on in " + LOCAL_NETWORK + ", then try again.")
     _save({"lights": lights, "connected_at": time.time()})
     return [_public(x) for x in lights]
+
+
+LOCAL_NETWORK = "System Settings → Privacy & Security → Local Network"
+# What sending to the Wi-Fi fails with when macOS hasn't let this app on it.
+_BLOCKED = re.compile(r"no route to host|operation not permitted|errno (?:65|1)\b", re.I)
+
+
+class _Errors(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.seen: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.seen.append(record.getMessage())
+
+
+async def _discover(**kw) -> dict:
+    """Ask the Wi-Fi which Tapo / Kasa devices are there. python-kasa only logs
+    a send that fails, so listen for it: macOS's Local Network privacy turns
+    every send into "No route to host" until the user lets Jarvis on."""
+    from kasa import Discover
+    errors, log = _Errors(), logging.getLogger("kasa.discover")
+    log.addHandler(errors)
+    try:
+        found = await Discover.discover(**kw)
+    finally:
+        log.removeHandler(errors)
+    if not found and any(_BLOCKED.search(m) for m in errors.seen):
+        raise LightsError("macOS is keeping Jarvis off your Wi-Fi, so it can't see your lights. "
+                          f"Turn Jarvis on in {LOCAL_NETWORK}, then try again.")
+    return found
 
 
 def _public(light: dict) -> dict:
@@ -151,8 +185,7 @@ async def _connect(light: dict):
 
 async def _rediscover(light: dict) -> bool:
     """The router moved the bulb to a new address: find it by its MAC."""
-    from kasa import Discover
-    found = await Discover.discover(timeout=4)
+    found = await _discover(timeout=4)
     for host, dev in found.items():
         if str(getattr(dev, "mac", "")).lower() == light["id"].lower() and host != light["host"]:
             data = _load()

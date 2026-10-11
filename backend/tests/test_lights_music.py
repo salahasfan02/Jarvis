@@ -122,6 +122,19 @@ def test_a_wrong_password_says_so(home_network):
     assert not lights.configured()
 
 
+def test_when_macos_keeps_jarvis_off_the_wifi_it_says_where_to_allow_it(home_network, monkeypatch):
+    import logging
+    from kasa import Discover
+
+    async def blocked(credentials=None, timeout=5, **kw):
+        logging.getLogger("kasa.discover").error("Got error: %s", OSError(65, "No route to host"))
+        return {}
+
+    monkeypatch.setattr(Discover, "discover", blocked)
+    with pytest.raises(lights.LightsError, match="Privacy & Security → Local Network"):
+        run(lights.connect_account("me@example.com", "pw"))
+
+
 def test_a_light_that_wont_connect_says_why(home_network):
     home_network["192.168.0.48"].error = OSError("Connection reset by peer")
     with pytest.raises(lights.LightsError, match="Found your light.*Connection reset"):

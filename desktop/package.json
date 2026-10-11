@@ -43,7 +43,8 @@
         "NSDocumentsFolderUsageDescription": "Jarvis finds, opens and creates documents when you ask it to.",
         "NSDownloadsFolderUsageDescription": "Jarvis finds and opens downloaded files when you ask it to.",
         "NSRemovableVolumesUsageDescription": "Jarvis opens files on external drives when you ask it to.",
-        "NSNetworkVolumesUsageDescription": "Jarvis opens files on network drives when you ask it to."
+        "NSNetworkVolumesUsageDescription": "Jarvis opens files on network drives when you ask it to.",
+        "NSLocalNetworkUsageDescription": "Jarvis finds and controls your smart lights on your Wi-Fi when you ask it to."
       }
     }
   }
