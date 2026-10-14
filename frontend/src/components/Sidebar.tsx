@@ -2,17 +2,18 @@ import { useEffect, useState } from "react";
 import {
   AlarmClock, Brain, Camera, Code, Folder, History, ListChecks, LucideIcon, MessageSquare,
   MessagesSquare, Orbit, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings, ShieldCheck,
-  Sparkles, SquareTerminal, Trash2, X,
+  Sparkles, SquareTerminal, Trash2, Workflow, X,
 } from "lucide-react";
 import { Conversation } from "../lib/api";
 
-export type Page = "core" | "chat" | "code" | "projects" | "camera"
+export type Page = "core" | "chat" | "code" | "projects" | "camera" | "teams"
   | "skills" | "settings" | "memory" | "dev" | "registry" | "routines" | "activity" | "setup";
 
 export const NAV: { id: Page; icon: LucideIcon; label: string; group: "" | "Assistant" | "System" }[] = [
   { id: "core", icon: Orbit, label: "Core", group: "" },
   { id: "chat", icon: MessagesSquare, label: "Chat", group: "" },
   { id: "projects", icon: Folder, label: "Projects", group: "Assistant" },
+  { id: "teams", icon: Workflow, label: "Agent teams", group: "Assistant" },
   { id: "routines", icon: AlarmClock, label: "Routines", group: "Assistant" },
   { id: "memory", icon: Brain, label: "Memory", group: "Assistant" },
   { id: "skills", icon: Sparkles, label: "Skills", group: "Assistant" },

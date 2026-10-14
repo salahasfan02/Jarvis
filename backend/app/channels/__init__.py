@@ -27,6 +27,10 @@ class ChannelSession:
     async def send_file(self, path: Path, caption: str = "") -> str:
         raise NotImplementedError
 
+    async def send_photo(self, path: Path, caption: str = "") -> str:
+        """A picture shown in the chat; channels that can't send the file."""
+        return await self.send_file(path, caption)
+
     async def send_text(self, text: str) -> str:
         raise NotImplementedError
 

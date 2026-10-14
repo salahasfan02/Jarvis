@@ -71,6 +71,11 @@ handlers run in a worker thread so a slow one can't stall the server — a
 handler that schedules asyncio tasks or touches the event loop must be
 `async def`.
 
+A tool can also take `prepare=fn`: it runs *before* the permission check and
+returns the arguments to ask about and run with — or a string, to answer
+without running. `facetime_call` uses it to look up "Salah's business
+number", so the confirmation shows the actual person and number.
+
 ## Adding an agent
 
 Call `agents.registry.register(Agent(id=..., name=..., description=...,
@@ -209,6 +214,87 @@ process started with `posix_spawn` as its **own responsible process**
 allows — as *Python*, while every other permission stays Jarvis's. It reads
 JSON requests on stdin, answers on stdout, restarts if it stops and exits
 with Jarvis. `JARVIS_LIGHTS_DIRECT=1` (tests, other OSes) runs in-process.
+
+## Calls (v5)
+
+`tools/builtin/facetime.py`: *"FaceTime Salah's business number"* (also an
+instant command in `chat/quick.py`) → `facetime_call(contact=…, kind=video|audio|phone)`.
+
+- **Who and which number** — `parse()` takes the number words out of the
+  name ("business number" → work, "mobile", "home", "iCloud"); `candidates()`
+  looks the person up in Jarvis's saved people first, then Contacts with
+  *every* labelled number and address (`people.contact_cards`). A wanted
+  label must exist — "no work number saved" is reported, never guessed; an
+  unlabelled saved number counts as a mobile. Two people by that name →
+  "which one?".
+- **Ask first, with the facts** — the tool's `prepare` step resolves all of
+  that before the confirmation, so the dialog shows "Salah Asfan, +44 20 …
+  (work)"; a lookup that fails answers without a dialog. It always works
+  from `contact` — a name or number the model adds itself is ignored, so
+  what's shown is what's dialled — and calls are `always_ask` (like sending
+  email): a misheard name or a number planted in something the model read
+  never rings unseen.
+- **Dialling** — `facetime://`, `facetime-audio://` or `tel://` (through the
+  iPhone). macOS then shows its own Call prompt; with Accessibility, Jarvis
+  finds that button in Notification Center (AX tree) and presses it — unless
+  an older prompt is still up, which could be someone else's.
+- Calls never start from the phone or a routine — nobody's at the Mac to talk.
+
+## Photos (v5)
+
+`take_photo` asks the Jarvis window for a `camera_photo` (`ui_bridge`): the
+Camera tab opens, counts down (3 s by default) and flashes, and the picture
+comes back to be saved by `vision/photos.py` in `~/Pictures/Jarvis`
+(`photo-<date>-<time>.jpg` — no spaces, so a model passes paths on intact).
+No window → `imagesnap`. *"Undo that"* moves it to the Bin.
+
+Sending: `ChannelSession.send_photo` — Telegram's `sendPhoto`, so it shows in
+the chat (files over 10 MB, or ones Telegram refuses, go as a document).
+`send_file` uses it for Jarvis's own photos, `send_to_phone(what="photo")`
+sends the last one taken in the chat ("send me that picture"), and
+`take_photo(send_to_phone=true)` does both in one call. The chat loop counts
+it as making a file ("take a photo and email it to Sam") and as sending one.
+The Camera page lists the photos (`/api/photos`) with send / show / delete.
+
+## Agent teams (v5)
+
+A team is a graph the user draws in the Agent teams tab: agents (name, role
+= instructions, skills, optional model, canvas position) and links ("A hands
+work to B"). One agent is the lead — the one the user talks to.
+`teams/store.py` keeps each team as one JSON document (normalized on save:
+unique ids and names, links only between agents that exist, a lead always
+set) plus templates (the Startup team: main → market research, backend,
+frontend, marketing).
+
+`teams/engine.py` runs one team at a time, in the background:
+
+```
+_turn(agent, brief):
+   has teammates? → plan (JSON schema: requirements + assignments
+                    [{agent ∈ teammate names, brief}], in working order)
+                  → each teammate: handoff → _turn(teammate, its brief,
+                    + what earlier teammates produced) → report
+                  → combine the reports into one answer
+   else           → work: its role, its skills' tools, up to 5 tool rounds
+```
+
+- **Skills are safe by construction**, so a run never stops to ask:
+  `research` (research / web_search / web_fetch, through `tools.execute`)
+  and `files` (save_file / read_file / list_files, confined to the run's
+  workspace `~/.jarvis/projects/teams/<team>-<time>/`). That folder is served
+  at `/projects/…` with the CSP sandbox, so a page an agent saves is live
+  ("deployed") but can't reach Jarvis's API — and has no storage, which the
+  agents are told.
+- Cycles are cut (a teammate never hands work back up its own chain), depth
+  is capped, a failing teammate is reported to its lead instead of sinking
+  the run, and long conversations shrink their oldest tool results.
+- Every step is an event (`agent_status`, `handoff`, `agent_plan`,
+  `agent_token`, `agent_tool`, `file`, `report`, `final`, `done`).
+  `GET /api/teams/runs/{id}/stream` replays the run so far (text merged) and
+  then follows it, so the tab can be left and rejoined; finished runs are
+  saved with every brief and output for the Runs menu.
+- `run_agent_team` hands a task to a team from chat, voice or the phone; the
+  answer comes back into that chat (and to the phone) when it's done.
 
 ## Roadmap hooks (already scaffolded)
 

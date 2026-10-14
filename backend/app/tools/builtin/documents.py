@@ -378,4 +378,7 @@ async def send_file(path: str, caption: str = "") -> str:
     if size > limit:
         return (f"{p.name} is {size // 2**20} MB — over the {limit // 2**20} MB limit "
                 f"for {channel.name}.")
+    from ...vision import photos
+    if photos.is_photo(p):    # a photo Jarvis took: shown in the chat, not as a file
+        return await channel.send_photo(p, caption)
     return await channel.send_file(p, caption)

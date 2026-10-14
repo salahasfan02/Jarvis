@@ -40,17 +40,39 @@ def _readable(text: str) -> str:
     return re.sub(r"```listing\n(.*?)```", r"\1", text, flags=re.S).strip()
 
 
-_MADE = re.compile(r" at (/\S.*?\.(?:docx|xlsx|pptx|pdf|md|txt|csv))\b")
+_MADE = re.compile(r" at (/\S.*?\.(?:docx|xlsx|pptx|pdf|md|txt|csv|jpe?g|png))\b")
 
 
 def _made_in(message: dict) -> str | None:
-    """The document an answer made ("I've written the report"), if any — then
-    "send it to me" means that file, not the sentence about it."""
+    """The document (or photo) an answer made ("I've written the report"), if
+    any — then "send it to me" means that file, not the sentence about it."""
     for t in reversed(message.get("meta", {}).get("tools") or []):
-        if str(t.get("name", "")).startswith(("create_", "research_report")):
+        if str(t.get("name", "")).startswith(("create_", "research_report", "take_photo")):
             if m := _MADE.search(str(t.get("result", ""))):
                 return m.group(1)
     return None
+
+
+def _latest_photo(msgs: list[dict]) -> Path | None:
+    """The photo meant by "send me that picture": the last one taken in this
+    chat, else the newest in the photos folder."""
+    from ...vision import photos
+    for m in reversed(msgs):
+        for t in reversed((m.get("meta") or {}).get("tools") or []):
+            if t.get("name") == "take_photo" and (found := _MADE.search(str(t.get("result", "")))):
+                if photos.is_photo(Path(found.group(1))):
+                    return Path(found.group(1))
+    newest = photos.recent(1)
+    return newest[0] if newest else None
+
+
+async def send_picture(path: Path, caption: str = "") -> str:
+    """A photo to the user's phone: this Telegram chat, else the paired phone."""
+    from ...channels import telegram
+    target = _target()
+    if target is None:
+        return telegram.why_not_owner()
+    return await target.send_photo(path, caption)
 
 
 def _transcript(msgs: list[dict], name: str) -> str:
@@ -62,13 +84,14 @@ def _transcript(msgs: list[dict], name: str) -> str:
     name="send_to_phone",
     description="Send something to the user's phone on Telegram. what='last_answer' sends "
                 "your previous answer ('send that/it to me'), 'conversation' the whole chat "
-                "('send me the whole chat'), 'text' the text you give. as_document=true "
+                "('send me the whole chat'), 'photo' the photo just taken with take_photo "
+                "('send me that picture'), 'text' the text you give. as_document=true "
                 "puts it in a Word document and sends the file instead ('put that in a "
                 "document and send it to me'). At the Mac, 'send it to me' always means this.",
     parameters={
         "type": "object",
         "properties": {
-            "what": {"type": "string", "enum": ["last_answer", "conversation", "text"]},
+            "what": {"type": "string", "enum": ["last_answer", "conversation", "photo", "text"]},
             "text": {"type": "string", "description": "only for what='text'"},
             "as_document": {"type": "boolean", "description": "send a Word document instead"},
             "title": {"type": "string", "description": "document title (optional)"},
@@ -80,11 +103,17 @@ async def send_to_phone(what: str = "last_answer", text: str = "", as_document: 
                         title: str = "") -> str:
     from ...channels import telegram
     from ...config import settings
+    from ...vision import photos
     target = _target()
     if target is None:
         return telegram.why_not_owner()
     name = settings.get("assistant.name", "Jarvis")
     msgs = await asyncio.to_thread(_earlier_messages)
+    if what == "photo":
+        shot = await asyncio.to_thread(_latest_photo, msgs)
+        if shot is None:
+            return "There's no photo to send yet — say \"take a picture\" first."
+        return await target.send_photo(shot, title)
     if what == "conversation":
         body = _transcript(msgs, name)
         if not body:
@@ -102,6 +131,8 @@ async def send_to_phone(what: str = "last_answer", text: str = "", as_document: 
         if last is None:
             return "There's no earlier answer in this chat to send."
         if (made := _made_in(last)) and Path(made).exists():
+            if photos.is_photo(Path(made)):
+                return await target.send_photo(Path(made))
             return await target.send_file(Path(made), Path(made).stem.replace("-", " "))
         body, default_title = _readable(last["content"]), ""
 

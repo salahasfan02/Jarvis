@@ -185,6 +185,38 @@ async def screen_read() -> str:
         path.unlink(missing_ok=True)
 
 
+async def _camera_image(kind: str = "camera_frame", payload: dict | None = None,
+                        timeout: float = 20) -> tuple[bytes, str]:
+    """A picture from the camera: (image bytes, '') or (b'', what went wrong).
+    The Jarvis window takes it — it has the camera permission (the backend
+    usually doesn't), and the user sees the camera open — else imagesnap."""
+    from ... import ui_bridge
+    reply = await ui_bridge.request(kind, payload, timeout=timeout)
+    image = (reply.get("image") or "").split(",")[-1]
+    if image:
+        try:
+            return base64.b64decode(image), ""
+        except ValueError:
+            return b"", "Couldn't use the camera: the picture came back unreadable."
+    if reply.get("error") not in (None, "no_ui"):
+        return b"", f"Couldn't use the camera: {reply['error']}"
+    path = Path(tempfile.mkstemp(suffix=".jpg")[1])
+    try:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "imagesnap", "-w", "1.5", str(path),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            await proc.wait()
+        except FileNotFoundError:
+            return b"", ("Open the Jarvis app so I can use its camera (or install imagesnap: "
+                         "brew install imagesnap).")
+        data = path.read_bytes() if path.exists() else b""
+        return (data, "") if data else (
+            b"", "Camera capture failed — open the Jarvis app and allow camera access.")
+    finally:
+        path.unlink(missing_ok=True)
+
+
 @tool(
     name="camera_look",
     description="Open the camera and look: switches the Jarvis app to its Camera tab, "
@@ -200,31 +232,57 @@ async def screen_read() -> str:
     agent_tags=["vision"],
 )
 async def camera_look(question: str = "Describe what you see.") -> str:
-    from ... import ui_bridge
+    image, error = await _camera_image()
+    if error:
+        return error
     path = Path(tempfile.mkstemp(suffix=".jpg")[1])
     try:
-        # The Jarvis window has camera permission (the backend usually doesn't),
-        # and the user sees the camera open in it.
-        reply = await ui_bridge.request("camera_frame", timeout=20)
-        image = (reply.get("image") or "").split(",")[-1]
-        if image:
-            path.write_bytes(base64.b64decode(image))
-        elif reply.get("error") not in (None, "no_ui"):
-            return f"Couldn't use the camera: {reply['error']}"
-        else:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "imagesnap", "-w", "1.5", str(path),
-                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-                await proc.wait()
-            except FileNotFoundError:
-                return ("Open the Jarvis app so I can use its camera (or install imagesnap: "
-                        "brew install imagesnap).")
-        if not path.exists() or path.stat().st_size == 0:
-            return "Camera capture failed — open the Jarvis app and allow camera access."
+        path.write_bytes(image)
         return await _describe_image(path, question)
     finally:
         path.unlink(missing_ok=True)
+
+
+@tool(
+    name="take_photo",
+    description="Take a photo with the camera and save it (in Pictures/Jarvis): switches "
+                "the Jarvis app to its Camera tab, counts down and snaps. send_to_phone=true "
+                "also sends it to the user's phone on Telegram ('take a picture and send it "
+                "to me'). To answer questions about what the camera sees, use camera_look.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "countdown": {"type": "integer",
+                          "description": "seconds to count down first so they can pose "
+                                         "(default 3; 0 = right away)"},
+            "send_to_phone": {"type": "boolean",
+                              "description": "also send it to the user's phone"},
+        },
+    },
+    risk="confirm",
+    agent_tags=["vision", "remote"],
+)
+async def take_photo(countdown: int = 3, send_to_phone: bool = False) -> str:
+    from ... import activity
+    from ...vision import photos
+    try:
+        countdown = max(0, min(int(countdown), 10))
+    except (TypeError, ValueError):
+        countdown = 3
+    image, error = await _camera_image("camera_photo", {"countdown": countdown},
+                                       timeout=25 + countdown)
+    if error:
+        return error
+    try:
+        path = await asyncio.to_thread(photos.save, image)
+    except (ValueError, OSError) as e:
+        return f"Couldn't save the photo: {e}"
+    activity.offer_undo(kind="remove_created", path=str(path))
+    said = f"Took a photo and saved it at {path}."
+    if send_to_phone:
+        from .phone import send_picture
+        said += " " + await send_picture(path)
+    return said
 
 
 @tool(

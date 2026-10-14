@@ -161,15 +161,17 @@ async def request(kind: str, payload: dict | None = None, timeout: float = 20) -
 
 
 async def announce(title: str, text: str, speak: bool = True,
-                   action: dict | None = None) -> bool:
+                   action: dict | None = None, conversation_id: str | None = None) -> bool:
     """Show (and speak) a message in every open Jarvis window — routines,
     triggers, offers of help. `action` ({label, prompt}) adds a button that
-    sends `prompt` as a request. Returns whether any window got it."""
+    sends `prompt` as a request; `conversation_id` names a chat that just got
+    a new message (an open window reloads it). Returns whether any window got it."""
     sent = False
     for ws in list(_sockets):
         try:
             await ws.send_json({"type": "announce", "title": title, "text": text,
-                                "speak": speak, "action": action})
+                                "speak": speak, "action": action,
+                                "conversation_id": conversation_id})
             sent = True
         except Exception:
             unregister(ws)

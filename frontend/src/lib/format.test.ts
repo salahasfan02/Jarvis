@@ -83,6 +83,24 @@ describe("words for what Jarvis did", () => {
     expect(a.title).toBe("Custom tool");
     expect(a.lines).toEqual([["File path", "/x"], ["Options", '{"a":1}']]);
   });
+
+  it("asks before a call with the person and the number it found", () => {
+    const a = describeAction("facetime_call", {
+      contact: "Salah's business number", kind: "video", who: "Salah Asfan",
+      number: "+44 20 7946 0222 (work)", handle: "+44 20 7946 0222" });
+    expect(a.title).toBe("FaceTime video call");
+    expect(a.lines).toEqual([["To", "Salah Asfan"], ["Number", "+44 20 7946 0222 (work)"]]);
+    expect(describeAction("facetime_call", { contact: "mum", kind: "audio" }).title).toBe("FaceTime audio call");
+    expect(stepLabel("facetime_call", true)).toBe("Started the call");
+  });
+
+  it("asks before taking a photo, and says when it'll be sent", () => {
+    expect(describeAction("take_photo", {}).lines).toEqual([["Timer", "3 seconds"]]);
+    expect(describeAction("take_photo", { countdown: 0, send_to_phone: true }).lines)
+      .toEqual([["Timer", "Right away"], ["Then", "Send it to your phone"]]);
+    expect(describeAction("send_to_phone", { what: "photo" }).lines)
+      .toEqual([["What", "The photo you just took"], ["As", "A photo"]]);
+  });
 });
 
 describe("small helpers", () => {

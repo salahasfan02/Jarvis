@@ -277,13 +277,15 @@ def _respect_intent(user_content: str, name: str) -> str:
 
 _CLAIMS_ACTION = re.compile(
     r"\b(?:i(?:'ve| have)?|i just)\s+(?:sent|drafted|emailed|replied|opened|created|"
-    r"scheduled|added|saved|moved|deleted|played|booked|set up|forwarded|found|located)\b"
-    r"|\bi(?:'m| am) (?:opening|sending|moving|deleting|playing)\b"
+    r"scheduled|added|saved|moved|deleted|played|booked|set up|forwarded|found|located|"
+    r"called|facetimed|rang|dialled|dialed|taken a (?:photo|picture|selfie))\b"
+    r"|\bi(?:'m| am) (?:opening|sending|moving|deleting|playing|calling)\b"
     r"|\bi (?:found|can see you have)\b|\bhere are the files\b"
     r"|\bhas been (?:sent|drafted|created|scheduled|saved|added|moved|deleted)\b", re.I)
 _ASKS_ACTION = re.compile(
     r"\b(send|e-?mail|draft|reply|forward|open|create|schedule|add|play|save|move|"
-    r"delete|book|remind|text|find|search|list|show|what tabs)\b", re.I)
+    r"delete|book|remind|text|find|search|list|show|what tabs|call|facetime|dial|ring|"
+    r"take|snap)\b", re.I)
 # Citing searches it never ran: never acceptable, whatever was asked.
 _FAKE_SOURCES = re.compile(r"\baccording to (?:recent |my |the )?(?:web )?search(?:es)?\b"
                            r"|(?:^|[.!?]\s+)sources?:\s", re.I | re.M)
@@ -296,16 +298,18 @@ CLAIM_NUDGE = ("(You answered as if you had done or looked something up, but you
 # the 3 files" after only listing them).
 _CLAIM_FAMILIES = (
     (r"(?:sent|emailed|forwarded|texted|messaged)\b|\bhave been sent|\bhas been sent"
-     r"|should (?:be )?arriv", ("send_", "forward", "reply")),
+     r"|should (?:be )?arriv", ("send_", "forward", "reply", "take_photo")),
     (r"(?:created|made|written|wrote|saved|added)\b|\bhas been (?:created|saved|added)",
      ("create_", "append_", "save", "move_file", "remember", "update_", "set_", "calendar_create",
-      "fill_form", "research_report")),
+      "fill_form", "research_report", "take_photo")),
     (r"(?:drafted\b|(?:prepared|put together) (?:a |an |the |your )?(?:\w+ )?"
      r"(?:draft|email|message|document|file|report|reply|note)s?\b)|\bhas been drafted",
      ("draft_", "create_", "research_report", "write_file")),
     (r"(?:scheduled|booked)\b|\bhas been scheduled", ("calendar_create", "create_")),
     (r"(?:deleted|trashed|removed)\b|\bhas been deleted", ("trash", "delete", "forget", "remove")),
     (r"moved\b|\bhas been moved", ("move_",)),
+    (r"(?:called|facetimed|rang|dialled|dialed)\b", ("facetime_call",)),
+    (r"taken (?:a |the |your )?(?:photo|picture|selfie)", ("take_photo",)),
 )
 _CLAIMS = [(re.compile(r"\b(?:i(?:[’']ve| have)?|i just|i[’']ve just)\s+" + verbs, re.I), prefixes)
            for verbs, prefixes in _CLAIM_FAMILIES]
@@ -323,7 +327,8 @@ _ANNOUNCES = re.compile(r"\b(?:let me|let[’']s|i[’']ll|i will|i[’']m going
 # tools find themselves.
 _STALLS = re.compile(
     r"\b(?:would you like me to|shall i|should i|do you want me to|want me to)\s+"
-    r"(?:go ahead and\s+)?(?:send|open|email|delete|move|create|draft|play|attach)\b"
+    r"(?:go ahead and\s+)?(?:send|open|email|delete|move|create|draft|play|attach|call|facetime|"
+    r"take)\b"
     r"|\b(?:could|can|would) you (?:please )?(?:provide|tell me|specify|share|give me|confirm)"
     r"[^.?!]{0,40}\b(?:path|file ?name|location|email address|address|which file)\b"
     r"|\bi need (?:the |your |its )?(?:file ?(?:path|name)|path|location|email address|"
@@ -344,7 +349,7 @@ FILE_NUDGE = ("(They asked for a FILE, not text in the chat. Create it now: rese
               "for a document about a real topic (it researches and writes it), otherwise "
               "create_word_document / create_spreadsheet / create_presentation with the full "
               "content inside. Don't apologise or mention this note.)")
-_MAKES_FILE = ("create_", "research_report")
+_MAKES_FILE = ("create_", "research_report", "take_photo")
 SEND_NUDGE = ("(They asked you to send it to them — that means their phone, on Telegram. "
               "Call send_to_phone now (what='last_answer' for your previous answer, "
               "'conversation' for the whole chat, as_document=true for a document) or "
@@ -363,6 +368,13 @@ def _wants_it_sent(text: str) -> bool:
     ('every morning send me…'), an email, or something for someone else."""
     return (bool(_SEND_TO_ME.search(text)) and not _NOT_NOW.search(text)
             and not _TO_SOMEONE.search(text))
+
+
+def _sent_it(event: dict) -> bool:
+    """A tool call that sends something to the user's phone ("take a picture
+    and send it to me" does both in one)."""
+    return event["name"] in ("send_file", "send_to_phone") or (
+        event["name"] == "take_photo" and bool((event.get("arguments") or {}).get("send_to_phone")))
 _SENDS_MESSAGE = re.compile(r"\b(?:e-?mail|mail|text|message|imessage|whatsapp|reply)\b", re.I)
 INTENT_NUDGE = ("(You said you would do that, but you didn't call the tool. Call it now — "
                 "don't describe it, don't apologise.)")
@@ -872,8 +884,7 @@ async def run_chat(conversation_id: str, user_content: str,
                 if (tool_schemas and not send_nudged and not said_no
                         and not getattr(channel, "auto_approve", False)
                         and _wants_it_sent(user_content)
-                        and not any(e["name"] in ("send_file", "send_to_phone")
-                                    and _took_effect(e["result"]) for e in tool_events)):
+                        and not any(_sent_it(e) and _took_effect(e["result"]) for e in tool_events)):
                     # "Send me the latest screenshot": found it, then showed a
                     # made-up link instead of sending it.
                     send_nudged = True
@@ -1287,7 +1298,7 @@ def _music_service(user_content: str, name: str, args: dict) -> tuple[str, dict]
 
 
 _DOC_TOOLS = ("create_word_document", "create_presentation")
-_MADE_PATH = re.compile(r" at (/\S.*?\.(?:docx|xlsx|pptx|pdf|md|txt|csv))\b")
+_MADE_PATH = re.compile(r" at (/\S.*?\.(?:docx|xlsx|pptx|pdf|md|txt|csv|jpe?g|png))\b")
 
 
 def _exists(path) -> bool:
@@ -1332,7 +1343,7 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
     # Loop guard: weaker models sometimes re-call the same tool instead of
     # answering. Return the earlier result and push them to conclude.
     for prior in tool_events:
-        if prior["name"] == name and prior["arguments"] == args:
+        if prior["name"] == name and args in (prior["arguments"], prior.get("asked")):
             out["output"] = (
                 "STOP — you already called this tool this turn and its result is "
                 "above. Do NOT call any more tools. Write your final answer for "
@@ -1347,8 +1358,21 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
     channel = channels.current.get()
     undo_slot, undo_token = activity.begin()   # tools leave their undo recipe here
 
+    # A tool's prepare step fills in what the user should see before saying
+    # yes ("Salah's business number" -> Salah Asfan, +44…) — or answers right
+    # away when there's nothing to run (nobody by that name).
+    asked_args, answered = args, ""
+    if t is not None and t.prepare is not None and not t.is_blocked():
+        prepared = await t.prepare_args(args)
+        if isinstance(prepared, str):
+            answered = prepared or "Nothing to do."
+        else:
+            args = prepared
+
     if t is None:
         output = f"Error: unknown tool '{name}'"
+    elif answered:
+        output = answered
     elif t.risk == "dangerous" and channel is not None and not channel.allow_dangerous:
         # A lost or borrowed phone must not be a remote shell. The user can
         # opt in under Settings → Phone; confirmations still apply then.
@@ -1397,8 +1421,11 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
 
     yield {"type": "tool_result", "name": name,
            "result": denied_label if denied else output[:1000], "denied": denied}
-    tool_events.append({"name": name, "arguments": args, "result": output[:2000]})
-    if not denied:
+    event = {"name": name, "arguments": args, "result": output[:2000]}
+    if args != asked_args:
+        event["asked"] = asked_args          # what the model passed, for the loop guard
+    tool_events.append(event)
+    if not denied and not answered:
         source = channel.name if channel is not None else "app"
         activity.record(name, args, output, source,
                         None if _failed(output) else undo_slot.get("undo"))

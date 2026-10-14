@@ -35,9 +35,9 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **🎙️ Voice-first** — say *"Jarvis…"* and it wakes up (with a chime), listens with **offline Whisper**, and replies in a **human neural voice**. Have a real back-and-forth conversation, hands-free.
 - **👁️ It can actually see** — reads your screen with Apple's OCR, watches through your camera, and answers questions about whatever's in front of you.
 - **🌐 It knows what's going on** — researches the web, reads the best pages and answers with **numbered sources**; live weather without an API key.
-- **🦾 It does things** — opens apps, controls your browser, plays anything on **Apple Music**, switches your **smart lights**, drafts emails, manages files, runs code — with a permission prompt before anything touches your system.
+- **🦾 It does things** — opens apps, controls your browser, plays anything on **Apple Music**, switches your **smart lights**, makes **FaceTime calls**, takes **photos**, drafts emails, manages files, runs code — with a permission prompt before anything touches your system.
 - **📱 It's in your pocket** — message it on Telegram, and *"send that to me"* puts any answer, chat or document on your phone.
-- **🧩 It's an OS, not a chatbot** — a living command-center dashboard with agents, projects, long-term memory, and a plugin system it can extend *itself*.
+- **🧩 It's an OS, not a chatbot** — a living command-center dashboard with agents, **agent teams you wire together on a canvas**, projects, long-term memory, and a plugin system it can extend *itself*.
 - **🆓 Free & source-available** — free for any **noncommercial** use. Fork it, hack it, make it yours.
 
 ---
@@ -93,6 +93,7 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 ### 👁️ Vision
 - Read the **exact text** on your screen (Apple Vision OCR)
 - **Live camera** — *"open the camera and tell me what you see"*
+- **Take photos** — *"take a picture"* counts down, snaps and saves it in Pictures › Jarvis (or press the shutter, with a 3 s or 10 s timer) · *"take a selfie and send it to me"* / *"send me that picture"* puts it on your phone, as a photo in the Telegram chat
 - **You always know** — a glowing frame surrounds your screen whenever Jarvis reads or controls it
 - **Screen watch** — "tell me when the download finishes"
 - **Screen memory** — auto-journals what you're working on
@@ -108,6 +109,7 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **Calendar** — *"what's on my calendar tomorrow?"* (all calendars, repeating events included) · **Notes, Reminders** — read and create; *"remind me at 6 to call Sam"* keeps the time (in Arabic too)
 - **Email** — *"summarize my emails"*, *"any new mail from Sam?"*, reply, draft, or send with attachments by name (*"email my CV to…"*); you approve every email first · draft iMessages
 - **Knows your people** — *"email my landlord"* finds them in Jarvis's memory or your Contacts
+- **FaceTime** — *"FaceTime Salah's business number"*, *"video call mum"*, *"FaceTime audio Sam"* — finds the person *and the right number* (the one labelled work, mobile, home…) in your saved people and Contacts, shows you exactly who and which number, then calls · with Accessibility allowed it also presses FaceTime's own *Call* prompt · *"phone the office through my iPhone"* makes an ordinary call
 
 </td>
 <td width="50%" valign="top">
@@ -133,13 +135,14 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 
 ### 🤖 Intelligence
 - **Auto-routing agents** (research, coding, media, vision…)
+- **Agent teams** — build a team of AI agents on a canvas: say what each one does, give it skills (web research, making files) and connect them. You talk to one — say, a *main agent* — and it works out what's needed, writes a detailed brief for each agent it's connected to (*backend*, *frontend*, *marketing*, *market research*…), and brings their work together. Web pages they make go live straight away. Or just say *"ask my startup team to…"*
 - **Multi-step task planner** with a live checklist
 - **Custom Skills** — save prompts, invoke with `/name`, import/export
 - **Self-improving** — logs what it can't do and can write its own tools
 - **Multi-model** — assign models per task, benchmark them
 - **Fast by design** — only the tools a request needs go into the prompt, so even a 14B model answers quickly
 - **Honest by design** — it never says it sent, saved or booked something unless a tool actually did it, it respects a *"no"*, and it doesn't repeat itself
-- **Built-in eval suite** — 90 real requests replayed against fake tools to check every model change, and it **learns from real mistakes**: slips and *"that's wrong"* become new test cases
+- **Built-in eval suite** — nearly 100 real requests replayed against fake tools to check every model change, and it **learns from real mistakes**: slips and *"that's wrong"* become new test cases
 - **Long conversations** — older turns are summarized in the background so nothing falls out of the model's memory
 - **Instant commands** — *"open YouTube"*, *"open Safari"*, *"pause"* run in well under a second, no model needed
 
@@ -340,6 +343,14 @@ Missing macOS permissions. Open System Settings → Privacy & Security and grant
 Playing from the Apple Music catalogue needs an **Apple Music subscription**, the **Music** app signed in, and **Accessibility** for Jarvis (it queues the song with *Play Next*). Songs already in your library play without either.
 </details>
 
+<details>
+<summary><b>"FaceTime …" opens FaceTime but the call doesn't start</b></summary>
+
+- macOS always asks before a call starts (a notification with a **Call** button). Jarvis presses it for you when it has **Accessibility** (System Settings → Privacy & Security → Accessibility); otherwise press *Call* yourself.
+- FaceTime must be signed in with your Apple Account. FaceTime reaches iPhones and Apple IDs, not landlines — for those, ask for a phone call (*"phone the office through my iPhone"*), which needs **Calls from iPhone** turned on in the FaceTime app's settings.
+- *"…has no work number saved"*: Jarvis never guesses which number you meant. Label the number in Contacts (work, mobile, home…), or say the number itself.
+</details>
+
 ---
 
 ## 📋 Requirements
@@ -369,6 +380,8 @@ Jarvis is built to earn your trust:
 - **Nothing is sent behind your back** — iMessages are only drafted; an email goes out only when you say *send* and approve that exact message (this approval can't be switched off).
 - **Websites can't drive it** — the local API only accepts changes and chat connections from Jarvis's own UI, so a page you visit can't talk to Jarvis behind your back.
 - **Sandboxed code** — generated code runs with no network, can't read your keys, mail or messages, can't script other apps, and can only write to its own folder.
+- **Agent teams stay in their lane** — team agents can only research the web and write files into their run's own workspace; the pages they publish are sandboxed too, so nothing they make can reach Jarvis or the rest of your Mac.
+- **Calls show you who first** — before Jarvis rings anyone you see the person and the exact number it found; calls never start from the phone or a routine, when you're not at the Mac to talk.
 
 ---
 
@@ -400,11 +413,11 @@ PRs, ideas, and bug reports are welcome. Jarvis is designed to be extended — w
 Run the tests (no Ollama needed):
 
 ```bash
-cd backend && .venv/bin/pip install pytest && .venv/bin/python -m pytest   # 210+ backend tests, any OS
+cd backend && .venv/bin/pip install pytest && .venv/bin/python -m pytest   # 240+ backend tests, any OS
 cd frontend && npm test                                                    # interface helpers (Vitest)
 ```
 
-Check how well a model handles real requests (needs Ollama; tools are faked, nothing on your Mac is touched): `cd backend && .venv/bin/python -m evals.run --model qwen2.5:14b` — prints pass/fail and timing for 90 requests like *"email my CV to…"*, *"send the weather you just gave me to my phone"* and *"make the bedroom light blue"*.
+Check how well a model handles real requests (needs Ollama; tools are faked, nothing on your Mac is touched): `cd backend && .venv/bin/python -m evals.run --model qwen2.5:14b` — prints pass/fail and timing for nearly 100 requests like *"email my CV to…"*, *"send the weather you just gave me to my phone"*, *"make the bedroom light blue"* and *"facetime mum"*.
 
 ## ⭐ Star it
 
