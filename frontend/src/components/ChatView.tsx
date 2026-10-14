@@ -23,6 +23,7 @@ const REFUSED = /^(?:The user DENIED|'[\w_]+' (?:is blocked|needs the user|contr
 export const AGENTS: Record<string, string> = {
   research: "Research", files: "Files", messaging: "Messages", vision: "Vision",
   automation: "Automation", media: "Media", coding: "Code", planner: "Planner",
+  team: "Agent team",
 };
 
 function textOf(node: any): string {

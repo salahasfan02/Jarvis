@@ -59,6 +59,14 @@ def _no_contacts_lookup(monkeypatch):
     """Looking people up in the Mac's Contacts app is not for tests."""
     from app.memory import people
     monkeypatch.setattr(people, "from_contacts", lambda q: [])
+    monkeypatch.setattr(people, "contact_cards", lambda q: [])
+
+
+@pytest.fixture(autouse=True)
+def _no_real_calls(monkeypatch):
+    """Tests must never press FaceTime's Call button on the real Mac."""
+    from app.tools.builtin import facetime
+    monkeypatch.setattr(facetime, "_ax", lambda: None)
 
 
 @pytest.fixture(autouse=True)

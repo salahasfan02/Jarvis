@@ -100,7 +100,8 @@ register(Agent(
 
 register(Agent(
     id="messaging", name="Messaging & Email Agent",
-    description="Reading, summarizing, drafting, sending and replying to email and messages.",
+    description="Reading, summarizing, drafting, sending and replying to email and messages; "
+                "FaceTime and phone calls.",
     prompt="You are in messaging mode. You can really read and send the user's email "
            "through Apple Mail — always do it with the tools, never just describe it.\n"
            "- Send: if the user says SEND or \"email X to someone\", call send_email. It "
@@ -121,6 +122,10 @@ register(Agent(
            "the name as `to` (e.g. to=\"my landlord\"); the tool looks them up in saved "
            "people and Contacts. Never ask for an address before trying. When the user "
            "tells you someone's details or relation, save them with remember_person.\n"
+           "- Calls: \"FaceTime X\", \"video call X\", \"call X\" — call facetime_call right "
+           "away with contact exactly as they said it (\"Salah's business number\"); it "
+           "finds the person and the right number itself. kind: video unless they say "
+           "audio/voice; phone only for an ordinary phone call through their iPhone.\n"
            "iMessages can only be drafted — the user presses send.",
     tool_tags=["messaging", "email", "files"]))
 
@@ -134,12 +139,14 @@ register(Agent(
 
 register(Agent(
     id="vision", name="Vision Agent",
-    description="Looking at the screen or through the camera; describing or reading visual content.",
+    description="Looking at the screen or through the camera; describing or reading visual "
+                "content; taking photos with the camera.",
     prompt="You are in vision mode. Use the screen/camera tools to see, then answer "
            "precisely what the user asked about the image. For anything about the "
            "camera (\"open the camera\", \"what can you see\", \"what am I holding\") call "
-           "camera_look — it opens the Camera tab and takes the photo itself. Never say "
-           "you can't access the camera.",
+           "camera_look — it opens the Camera tab and takes the photo itself. To TAKE a "
+           "picture, photo or selfie, call take_photo (send_to_phone=true when they want it "
+           "sent to them). Never say you can't access the camera.",
     tool_tags=["vision"]))
 
 
@@ -156,7 +163,8 @@ _ROUTE_EXAMPLES: dict[str, list[str]] = {
     "vision": ["what's on my screen right now", "what am I looking at",
                "read the text on my screen", "take a look through the camera",
                "describe what you see", "open the camera and tell me what you see",
-               "what can you see through the camera", "what am I holding"],
+               "what can you see through the camera", "what am I holding",
+               "take a picture", "take a photo of me", "take a selfie and send it to me"],
     "research": ["what's the latest AI news", "search the web for flight prices",
                  "what's the weather tomorrow", "who won the game last night",
                  "find documentation for FastAPI", "compare iPhone and Pixel"],
@@ -171,7 +179,8 @@ _ROUTE_EXAMPLES: dict[str, list[str]] = {
                   "summarize my emails", "do I have any new email",
                   "reply to Sam's email", "send an email to my landlord",
                   "reply to Emma's message", "summarize my messages",
-                  "did anyone text me today"],
+                  "did anyone text me today", "facetime mum", "video call Sam",
+                  "call my landlord on facetime", "facetime Salah's business number"],
     "automation": ["open safari", "close spotify", "create a note about the meeting",
                    "set a reminder for 6pm", "what's on my calendar",
                    "copy this to my clipboard", "give me my daily briefing",
@@ -224,7 +233,8 @@ _ROUTE_KEYWORDS: dict[str, list[str]] = {
               "spotify", "shuffle", "volume", "track"],
     "vision": ["screen", "camera", "webcam", "looking at", "what do you see",
                "what can you see", "holding",
-               "what am i", "read this", "on my display"],
+               "what am i", "read this", "on my display", "picture", "photo", "selfie",
+               "pic"],
     "research": ["search", "news", "weather", "price", "google", "look up",
                  "latest", "who is", "what is the", "compare", "stock"],
     "coding": ["code", "function", "script", "debug", "python", "javascript",
@@ -233,7 +243,8 @@ _ROUTE_KEYWORDS: dict[str, list[str]] = {
     "files": ["file", "folder", "desktop", "downloads", "organize", "rename",
               "directory", "trash", "documents"],
     "messaging": ["email", "mail", "imessage", "message", "text him", "text her",
-                  "draft", "reply to", "inbox", "unread"],
+                  "draft", "reply to", "inbox", "unread", "facetime", "face time",
+                  "video call", "audio call", "call"],
     "automation": ["open", "close", "launch", "quit", "safari", "chrome", "app",
                    "note", "reminder", "calendar", "clipboard", "tab", "window",
                    "youtube", "click", "press", "tap on", "form", "fill in", "fill out",

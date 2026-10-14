@@ -122,11 +122,13 @@ async def pull_model(name: str) -> AsyncIterator[dict]:
 
 
 async def chat_stream(messages: list[dict], model: str | None = None,
-                      tools: list[dict] | None = None) -> AsyncIterator[dict]:
+                      tools: list[dict] | None = None,
+                      format: str | dict | None = None) -> AsyncIterator[dict]:
     """Stream chat chunks. Yields the raw Ollama chunk dicts.
 
     Text chunks arrive as {"message": {"content": "..."}}; tool calls arrive
     as {"message": {"tool_calls": [...]}} (Ollama emits those non-streamed).
+    `format` ("json" or a JSON schema) constrains the reply, as in chat_once.
     """
     payload: dict[str, Any] = {
         "model": model or settings.get("ollama.model"),
@@ -140,6 +142,8 @@ async def chat_stream(messages: list[dict], model: str | None = None,
     }
     if tools:
         payload["tools"] = tools
+    if format:
+        payload["format"] = format
     try:
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream("POST", f"{_host()}/api/chat", json=payload) as r:

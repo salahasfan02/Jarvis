@@ -170,6 +170,9 @@ const STEP: Record<string, [string, string]> = {
   screen_read: ["Reading your screen", "Read your screen"],
   screen_look: ["Looking at your screen", "Looked at your screen"],
   camera_look: ["Looking through the camera", "Looked through the camera"],
+  take_photo: ["Taking a photo", "Took a photo"],
+  facetime_call: ["Starting the call", "Started the call"],
+  run_agent_team: ["Briefing your agent team", "Handed it to your agent team"],
   watch_screen: ["Watching your screen", "Watching your screen"],
   remember: ["Remembering that", "Remembered that"],
   remember_person: ["Saving the contact", "Saved the contact"],
@@ -246,8 +249,21 @@ export function describeAction(tool: string, args: Record<string, any>): ActionS
     case "send_to_phone":
       return { title: "Send to your phone",
                lines: pick(["What", a.what === "conversation" ? "This whole chat"
+                                   : a.what === "photo" ? "The photo you just took"
                                    : a.what === "text" ? s(a.text).slice(0, 300) : "My last answer"],
-                           ["As", a.as_document ? "A Word document" : "A Telegram message"]) };
+                           ["As", a.what === "photo" ? "A photo"
+                                  : a.as_document ? "A Word document" : "A Telegram message"]) };
+    case "facetime_call": {
+      const kind = a.kind === "audio" ? "FaceTime audio call"
+        : a.kind === "phone" ? "Phone call through your iPhone" : "FaceTime video call";
+      return { title: kind, lines: pick(["To", a.who || a.contact], ["Number", a.number || a.handle]) };
+    }
+    case "take_photo":
+      return { title: "Take a photo with the camera",
+               lines: pick(["Timer", Number(a.countdown ?? 3) > 0 ? `${Number(a.countdown ?? 3)} seconds` : "Right away"],
+                           ["Then", a.send_to_phone ? "Send it to your phone" : ""]) };
+    case "run_agent_team":
+      return { title: "Hand this to your agent team", lines: pick(["Team", a.team], ["Task", a.task]) };
     case "trash_file":
       return { title: "Move to the Bin", lines: pick(["File", base(a.path)], ["From", a.path]) };
     case "move_file":

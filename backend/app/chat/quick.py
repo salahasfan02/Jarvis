@@ -151,6 +151,8 @@ def match(text: str) -> QuickAction | None:
         return action
     if len(low) > 80 or " and " in f" {low} " or "," in low:
         return None  # compound or long requests need real understanding
+    if action := _facetime(t, low):
+        return action
 
     # YouTube first: "open drake on youtube" is a video, not an app called that.
     if m := re.fullmatch(r"(?:search(?: for)?|find|look up)\s+(.+?)\s+on\s+youtube", low):
@@ -280,8 +282,73 @@ def _instant(t: str, low: str) -> QuickAction | None:
     # "send that to me" / "send me the whole chat" / "put that in a document and send it to me"
     if action := _send_to_me(low):
         return action
+    # "take a picture" / "take a selfie and send it to me"
+    if action := _photo(low):
+        return action
     if action := _lights(low):
         return action
+    return None
+
+
+# ---- calls and photos --------------------------------------------------------------
+
+_FT = r"face ?time"
+_CALL_KIND = r"(?P<kind>video|audio|voice)"
+_FACETIME = (
+    # "facetime salah", "facetime audio mum", "facetime video call with sam"
+    re.compile(rf"{_FT}(?:\s+{_CALL_KIND})?(?:\s+call)?(?:\s+(?:with|to))?\s+(?P<who>.+)"),
+    # "make a facetime call to salah", "start a facetime audio call with mum"
+    re.compile(rf"(?:make|start|place|do)\s+(?:a\s+)?{_FT}(?:\s+{_CALL_KIND})?(?:\s+call)?"
+               rf"\s+(?:to|with)\s+(?P<who>.+)"),
+    # "call salah on facetime", "ring mum over facetime audio"
+    re.compile(rf"(?:call|ring|phone|dial)\s+(?P<who>.+?)\s+(?:on|via|over|using|with|through)"
+               rf"\s+{_FT}(?:\s+{_CALL_KIND})?(?:\s+call)?"),
+    # "video call salah", "make a video call to mum", "voice call dad"
+    re.compile(rf"(?:(?:make|start|place|do)\s+(?:an?\s+)?)?{_CALL_KIND}\s+call\s+(?:to\s+|with\s+)?"
+               rf"(?P<who>.+)"),
+)
+# "facetime him" needs the conversation; "facetime audio" isn't a person.
+_NOT_A_NAME = {"him", "her", "them", "it", "back", "me", "us", "someone", "somebody", "anyone",
+               "him back", "her back", "them back", "app", "the app", "settings", "call", "audio",
+               "video", "voice"}
+# "FaceTime isn't working", "video call quality is bad": about FaceTime, not a call.
+_ABOUT_IT = re.compile(
+    r"(?:is|isn'?t|are|aren'?t|was|wasn'?t|keeps?|won'?t|doesn'?t|does|did|didn'?t|has|hasn'?t|"
+    r"have|not|no|can'?t|cannot|should|stopped|crash\w*|fail\w*|freez\w*|quality|settings?|"
+    r"issues?|problems?|errors?|help|works?|working|broken|lag|lags|lagging|laggy|sound|camera|"
+    r"mic|microphone)\b", re.I)
+
+
+def _facetime(t: str, low: str) -> QuickAction | None:
+    """"FaceTime Salah's business number", "video call mum", "call Sam on
+    FaceTime" — the call, straight away; the tool finds who and which number."""
+    for pattern in _FACETIME:
+        if m := pattern.fullmatch(low):
+            who = t[m.start("who"):m.end("who")].strip()
+            if not who or who.lower() in _NOT_A_NAME or _ABOUT_IT.match(who):
+                return None
+            kind = "audio" if m.group("kind") in ("audio", "voice") else "video"
+            return QuickAction("facetime_call", {"contact": who, "kind": kind}, "")
+    return None
+
+
+_PIC = r"(?:picture|photo|pic|photograph|selfie)"
+_TAKE_PHOTO = re.compile(
+    r"(?:take|snap|grab|shoot)\s+(?:a\s+|an\s+|my\s+|me\s+a\s+|another\s+|one\s+more\s+)?"
+    rf"(?:quick\s+|new\s+)?{_PIC}"
+    r"(?:\s+of\s+(?:me|us|myself|this|that|it|him|her|them))?"
+    r"(?:\s+(?:with|using|on|from|through)\s+(?:the\s+|my\s+)?(?:camera|webcam|mac))?")
+_AND_SEND = re.compile(
+    r"(?:,\s*|\s+)and\s+(?:then\s+)?send\s+(?:it|that|this|the\s+(?:picture|photo|pic|selfie))"
+    r"(?:\s+(?:back\s+)?to\s+me|\s+me|\s+to\s+my\s+phone)?(?:\s+(?:on|via|over|through)\s+telegram)?$")
+
+
+def _photo(low: str) -> QuickAction | None:
+    """'take a picture', 'take a selfie and send it to me' — the camera, now.
+    'Take a picture of my screen' isn't the camera, so it goes to the model."""
+    m = _AND_SEND.search(low)
+    if _TAKE_PHOTO.fullmatch((low[:m.start()] if m else low).strip()):
+        return QuickAction("take_photo", {"send_to_phone": True} if m else {}, "")
     return None
 
 
@@ -322,11 +389,14 @@ _PHONE = r"(?: on telegram| via telegram| on my phone| to my phone| as a (?:text
 _IT = r"(?:it|that|this|the (?:answer|reply|last (?:answer|message|reply)))"
 _CHAT = r"(?:the |this |our |my )?(?:whole |entire |full )?(?:chat|conversation)(?: history)?"
 _DOC = r"(?:a )?(?:word )?(?:doc|document|docx)"
+_PHOTO_REF = r"(?:the |that |this |my |the last |that last )(?:picture|photo|pic|selfie|photograph)"
 
 
 def _send_to_me(low: str) -> QuickAction | None:
     """Sending to the user's phone (Telegram). The reply is the tool's own
     words, so "Telegram isn't set up" is said instead of a cheerful "Sent"."""
+    if re.fullmatch(rf"send (?:me )?{_PHOTO_REF}(?: (?:back |over )?to me)?{_PHONE}", low):
+        return QuickAction("send_to_phone", {"what": "photo"}, "")
     if re.fullmatch(rf"send {_IT}(?: back| over)?(?: to me)?{_PHONE}|send me {_IT}{_PHONE}"
                     rf"|text (?:it|that) to me|text me (?:it|that)", low):
         return QuickAction("send_to_phone", {"what": "last_answer"}, "")

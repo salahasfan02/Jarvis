@@ -4,6 +4,52 @@ Newest first. The short hashes in brackets show which commit made each change.
 
 ---
 
+# October 2026 — FaceTime, photos and agent teams
+
+## FaceTime calls
+
+- **"FaceTime Salah's business number"**, *"video call mum"*, *"FaceTime
+  audio Sam"*, *"call my landlord on FaceTime"* — answered instantly. Jarvis
+  finds the person in your saved people, then Contacts, and picks the number
+  you meant by its label (work, mobile, home, iCloud). If they have no such
+  number it says so instead of calling another one; two people with that
+  name, and it asks which.
+- The confirmation shows exactly who and which number before anything
+  rings. With Accessibility, Jarvis also presses FaceTime's own *Call*
+  prompt. *"Phone … through my iPhone"* makes an ordinary call.
+- Calls never start from the phone or a routine.
+
+## Photos
+
+- **"Take a picture"** opens the Camera tab, counts down 3 seconds, flashes
+  and saves the photo in Pictures › Jarvis. The Camera page has a shutter
+  button with a self-timer, and a strip of your photos to view, send, show in
+  Finder or delete.
+- **"Take a selfie and send it to me"**, **"send me that picture"**, or *"send
+  it to me"* right after: the photo arrives in your Telegram chat as a
+  picture, not a file. *"Undo that"* moves a photo to the Bin.
+
+## Agent teams
+
+- A new **Agent teams** tab: build a team of AI agents on a canvas — add
+  agents, say what each does, give them skills (web research, making files),
+  pick a model per agent, and drag from one agent to another to connect them.
+- You talk to one agent (the one with the crown). It works out what's needed,
+  writes a detailed brief for each agent it's connected to, they work in turn
+  — each building on what came before — and it brings their work together.
+  Watch it live: who's working, which brief is moving along which link, each
+  agent's output, the files they saved.
+- A ready-made **Startup team** — main agent, market research, backend,
+  frontend and marketing — and a Research & writing team. Web pages a team
+  makes are live at once in a sandboxed preview.
+- Runs are kept: open any earlier run from the Runs menu. Or ask from chat or
+  your phone: *"ask my startup team to build a landing page for my bakery"* —
+  the answer comes back into that chat.
+- Team agents can only research the web and write into their run's own
+  folder, so a run never needs to stop and ask.
+
+---
+
 # October 2026 — research, Apple Music, smart lights, a redesign and a real Mac app
 
 ## Research the web, with sources [8c16c6d, be67cd9]

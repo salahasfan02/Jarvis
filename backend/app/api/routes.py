@@ -799,6 +799,69 @@ async def vision_ask(body: dict):
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 
+# --- photos ("take a picture") ---------------------------------------------------
+
+@router.get("/photos")
+def photos_list(limit: int = 60):
+    from ..vision import photos
+    return [photos.info(p) for p in photos.recent(min(limit, 500))]
+
+
+@router.get("/photos/file/{name}")
+def photos_file(name: str):
+    from fastapi.responses import FileResponse, JSONResponse
+    from ..vision import photos
+    p = photos.by_name(name)
+    if p is None:
+        return JSONResponse({"error": "no such photo"}, status_code=404)
+    return FileResponse(p)
+
+
+@router.post("/photos")
+async def photos_save(body: dict):
+    """A photo taken with the Camera page's shutter button (a data URL)."""
+    from ..vision import photos
+    raw = photos.image_bytes(body.get("image") or "")
+    if not raw:
+        return {"error": "That isn't a JPEG or PNG photo."}
+    p = await asyncio.to_thread(photos.save, raw)
+    audit.log("photo_taken", path=str(p), source="camera_page")
+    return photos.info(p)
+
+
+@router.post("/photos/{name}/send")
+async def photos_send(name: str):
+    from ..tools.builtin.phone import send_picture
+    from ..vision import photos
+    p = photos.by_name(name)
+    if p is None:
+        return {"ok": False, "result": "That photo isn't there any more."}
+    result = await send_picture(p)
+    return {"ok": result.startswith("Sent"), "result": result}
+
+
+@router.post("/photos/{name}/reveal")
+def photos_reveal(name: str):
+    import subprocess
+    from ..vision import photos
+    p = photos.by_name(name)
+    if p is None:
+        return {"ok": False}
+    subprocess.run(["open", "-R", str(p)], timeout=10)
+    return {"ok": True}
+
+
+@router.delete("/photos/{name}")
+async def photos_delete(name: str):
+    from ..vision import photos
+    p = photos.by_name(name)
+    if p is None:
+        return {"ok": False}
+    ok = await asyncio.to_thread(photos.trash, p)
+    audit.log("photo_deleted", path=str(p), ok=ok)
+    return {"ok": ok}
+
+
 # --- quick command (menu-bar mini window) ---------------------------------------
 
 @router.post("/quick")

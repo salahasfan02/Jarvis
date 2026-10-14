@@ -83,6 +83,31 @@ CASES = [
     {"say": "read the text on my screen", "tools": ["screen_read"]},
     {"say": "open the camera and tell me what you see", "tools": ["camera_look"]},
     {"say": "can you open camera and tell me what can you see?", "tools": ["camera_look"]},
+    {"say": "take a picture", "tools": ["take_photo"]},
+    {"say": "take a photo of me and send it to my phone", "tools": ["take_photo"],
+     "args": {"take_photo": {"send_to_phone": "true"}}},
+    {"say": "snap a quick photo with the webcam then send it over to me on telegram",
+     "tools": ["take_photo"], "reply_not": r"(?i)can'?t|cannot|unable"},
+    {"say": "send me the picture you just took", "tools": ["send_to_phone"],
+     "args": {"send_to_phone": {"what": "photo"}},
+     "history": [{"role": "user", "content": "take a picture"},
+                 {"role": "assistant", "content": "Took a photo and saved it at /Users/salah/Pictures/Jarvis/photo-2026-10-14-22-30-15.jpg.",
+                  "meta": {"agent": "quick", "tools": [{"name": "take_photo", "arguments": {},
+                           "result": "Took a photo and saved it at /Users/salah/Pictures/Jarvis/photo-2026-10-14-22-30-15.jpg."}]}}]},
+
+    # --- calls -------------------------------------------------------------------------------
+    {"say": "facetime mum", "tools": ["facetime_call"], "args": {"facetime_call": {"contact": "mum"}},
+     "people": [{"name": "Mum", "relation": "mum", "phone": "07700 900333"}]},
+    {"say": "could you give my mum a quick video call", "tools": ["facetime_call"],
+     "args": {"facetime_call": {"contact": "mum", "kind": "video"}},
+     "people": [{"name": "Mum", "relation": "mum", "phone": "07700 900333"}]},
+    {"say": "call my landlord on facetime audio please", "tools": ["facetime_call"],
+     "args": {"facetime_call": {"contact": "landlord", "kind": "audio"}},
+     "people": [{"name": "Tom", "relation": "landlord", "phone": "07700 900444"}]},
+
+    # --- agent teams ---------------------------------------------------------------------------
+    {"say": "ask my startup team to build a landing page and a launch plan for a dog-walking app",
+     "tools": ["run_agent_team"], "args": {"run_agent_team": {"task": "dog"}}},
     {"say": "tell me when the download finishes on my screen", "tools": ["watch_screen"],
      "args": {"watch_screen": {"condition": "download"}}},
 

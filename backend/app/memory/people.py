@@ -142,6 +142,76 @@ def lookup(query: str) -> list[dict]:
     return known(query) or from_contacts(re.sub(r"^(?:my|the)\s+", "", query.strip(), flags=re.I))
 
 
+def contact_cards(query: str) -> list[dict]:
+    """Contacts cards whose name (or nickname) contains `query`, with EVERY
+    phone number and email address and its label — for calls, where "Salah's
+    business number" must be the one labelled work, not just the first one.
+    -> [{"name", "handles": [{"kind": "phone"|"email", "label", "value"}]}]"""
+    name = query.strip().replace('"', "").replace("\\", "")
+    if len(name) < 2:
+        return []
+    script = f'''
+    set out to ""
+    tell application "Contacts"
+        set found to {{}}
+        try
+            set found to found & (every person whose name contains "{name}")
+        end try
+        try
+            set found to found & (every person whose nickname contains "{name}")
+        end try
+        repeat with p in found
+            set pid to id of p
+            set nm to name of p
+            repeat with ph in (phones of p)
+                set lb to ""
+                try
+                    set lb to (label of ph) as text
+                end try
+                set out to out & pid & tab & nm & tab & "phone" & tab & lb & tab & (value of ph) & linefeed
+            end repeat
+            repeat with em in (emails of p)
+                set lb to ""
+                try
+                    set lb to (label of em) as text
+                end try
+                set out to out & pid & tab & nm & tab & "email" & tab & lb & tab & (value of em) & linefeed
+            end repeat
+        end repeat
+    end tell
+    return out'''
+    try:
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=20)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+    return parse_cards(r.stdout or "")
+
+
+def parse_cards(text: str) -> list[dict]:
+    """The Contacts script's lines (id, name, kind, label, value) -> cards."""
+    cards: dict[str, dict] = {}
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 5 or not parts[1].strip() or not parts[4].strip():
+            continue
+        pid, name, kind, label, value = (p.strip() for p in parts[:5])
+        card = cards.setdefault(pid or name, {"name": name, "handles": []})
+        handle = {"kind": "email" if kind == "email" else "phone",
+                  "label": clean_label(label), "value": value}
+        if handle not in card["handles"]:
+            card["handles"].append(handle)
+    return list(cards.values())
+
+
+def clean_label(raw: str) -> str:
+    """Contacts' '_$!<Work>!$_' -> 'work'; 'iPhone' -> 'iphone'; none -> ''."""
+    raw = (raw or "").strip()
+    if raw.lower() in ("", "missing value"):
+        return ""
+    m = re.fullmatch(r"_\$!<(.+?)>!\$_", raw)
+    return (m.group(1) if m else raw).strip().lower()
+
+
 def resolve_email(recipient: str) -> tuple[str | None, list[dict]]:
     """'Sam' / 'my landlord' -> (email, []) when clear, else (None, candidates)."""
     if EMAIL.fullmatch(recipient.strip()):

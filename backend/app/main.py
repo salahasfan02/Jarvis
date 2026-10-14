@@ -13,13 +13,14 @@ from fastapi.responses import PlainTextResponse
 
 from . import db
 from .api.routes import router
+from .api.teams import router as teams_router
 from .plugins import loader as plugin_loader
 
 # Importing the builtin tool modules registers their tools.
 from .tools.builtin import (  # noqa: F401
-    browser, calendars, control, documents, filesystem, forms, imessage, macos, mail, music,
-    lights_tools, office, people, phone, research, routine_tools, screen_click, shortcuts,
-    system, timer_tools, weather, web)
+    browser, calendars, control, documents, facetime, filesystem, forms, imessage, macos, mail,
+    music, lights_tools, office, people, phone, research, routine_tools, screen_click, shortcuts,
+    system, team_tools, timer_tools, weather, web)
 
 
 @asynccontextmanager
@@ -96,6 +97,7 @@ app.add_middleware(
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
 app.include_router(router)
+app.include_router(teams_router)
 
 # Persistent sandbox projects, served for live HTML/web previews.
 from fastapi.staticfiles import StaticFiles  # noqa: E402

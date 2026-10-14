@@ -40,6 +40,7 @@ TOKEN_FILE = JARVIS_HOME / "telegram_token"
 STATE_FILE = JARVIS_HOME / "telegram_state.json"
 INBOX_DIR = Path.home() / "Downloads" / "Jarvis"
 MAX_DOWNLOAD = 20 * 1024 * 1024     # Bot API limit for files a bot can fetch
+PHOTO_LIMIT = 10 * 1024 * 1024      # ...and for a photo it sends (bigger ones go as a file)
 PAIRING_TTL = 600
 PAIRING_MAX_ATTEMPTS = 5
 CHUNK = 3800                        # Telegram caps messages at 4096 chars
@@ -80,6 +81,10 @@ TOOL_LABELS = {
     "send_reply": "📨 Sending the reply",
     "calendar_events": "📅 Checking your calendar",
     "calendar_today": "📅 Checking your calendar",
+    "take_photo": "📸 Taking a photo",
+    "camera_look": "📷 Looking through the camera",
+    "send_to_phone": "📤 Sending it to you",
+    "run_agent_team": "🤝 Handing it to your agent team",
 }
 
 _YES = {"yes", "y", "yeah", "yep", "yup", "ok", "okay", "sure", "allow", "approve",
@@ -341,6 +346,28 @@ class TelegramSession(ChannelSession):
         audit.log("telegram_file_sent", path=str(path), bytes=len(data))
         return f"Sent {path.name} ({len(data) // 1024} KB) to the user's phone via Telegram."
 
+    async def send_photo(self, path: Path, caption: str = "") -> str:
+        """Shown in the chat as a picture. Telegram takes photos up to 10 MB (and
+        not too long and thin); anything else goes as a file instead."""
+        try:
+            data = await asyncio.to_thread(path.read_bytes)
+        except OSError as e:
+            return f"Could not send {path.name}: {e}"
+        if len(data) > PHOTO_LIMIT or path.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+            return await self.send_file(path, caption)
+        try:
+            await self.bot.api.call("sendChatAction", chat_id=self.chat_id, action="upload_photo")
+            await self.bot.api.call("sendPhoto", chat_id=self.chat_id,
+                                    caption=caption[:1024] or None,
+                                    files={"photo": (path.name, data)})
+        except TelegramError:
+            return await self.send_file(path, caption)
+        except httpx.HTTPError as e:
+            return f"Could not send {path.name}: {_redact(str(e))}"
+        self.sent_files.append(path)
+        audit.log("telegram_photo_sent", path=str(path), bytes=len(data))
+        return "Sent the photo to your phone on Telegram."
+
     async def send_text(self, text: str) -> str:
         try:
             await self.bot.send_markdown(self.chat_id, text)
@@ -359,6 +386,10 @@ class OwnerSession(ChannelSession):
 
     async def send_file(self, path: Path, caption: str = "") -> str:
         results = [await s.send_file(path, caption) for s in self.sessions]
+        return next((r for r in results if r.startswith("Could not")), results[0])
+
+    async def send_photo(self, path: Path, caption: str = "") -> str:
+        results = [await s.send_photo(path, caption) for s in self.sessions]
         return next((r for r in results if r.startswith("Could not")), results[0])
 
     async def send_text(self, text: str) -> str:

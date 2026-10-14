@@ -191,8 +191,20 @@ def fake_output(name: str, args: dict) -> str:
     if name == "music_play":
         return f"Playing {args.get('query') or 'music'} from Apple Music."
     if name == "send_to_phone":
+        if args.get("what") == "photo":
+            return "Sent the photo to your phone on Telegram."
         return ("Sent to your phone on Telegram." if not args.get("as_document")
                 else "Sent the Word document to your phone on Telegram.")
+    if name == "take_photo":
+        said = f"Took a photo and saved it at {FAKE_HOME}/Pictures/Jarvis/photo-2026-10-14-22-30-15.jpg."
+        return said + (" Sent the photo to your phone on Telegram." if args.get("send_to_phone") else "")
+    if name == "facetime_call":
+        kind = {"audio": "FaceTime audio call", "phone": "phone call through your iPhone"}.get(
+            args.get("kind", ""), "FaceTime video call")
+        return f"Calling {args.get('who') or args.get('contact')} ({args.get('number', '')}) — {kind}."
+    if name == "run_agent_team":
+        return ("Handed it to Startup team: Main agent is briefing the team now. It runs in the "
+                "background — the result will come back here when it's done.")
     if name == "daily_briefing":
         return "Briefing: 2 meetings today, 3 unread emails, sunny 18°C."
     return "Done."
@@ -333,6 +345,8 @@ def setup(model: str | None, utility: str | None) -> None:
     async def approve(_id):
         return True
     confirmations.wait = approve                               # say yes to every confirmation
+    from app.memory import people
+    people.contact_cards = lambda q: []    # calls find people in the case's own list, not Contacts
     context.browser_name = lambda: "Google Chrome"
     context.app_running = lambda name: name in ("Google Chrome", "Mail", "Music")
     context.list_tabs = lambda browser=None: TABS

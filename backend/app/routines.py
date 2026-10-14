@@ -222,6 +222,14 @@ class RoutineSession(channels.ChannelSession):
         results = [await TelegramSession(bot, u["id"]).send_file(path, caption) for u in users]
         return results[0]
 
+    async def send_photo(self, path: Path, caption: str = "") -> str:
+        bot, users = _telegram()
+        if not bot:
+            return f"No phone is connected; the photo is at {path}."
+        from .channels.telegram import TelegramSession
+        results = [await TelegramSession(bot, u["id"]).send_photo(path, caption) for u in users]
+        return results[0]
+
 
 def _telegram():
     try:

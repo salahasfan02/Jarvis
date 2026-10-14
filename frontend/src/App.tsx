@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp, Bell, Code, Ear, FileText, Image as ImageIcon, MessageSquare, Mic, PanelLeft, Paperclip,
   Plus, Square, Upload, X,
@@ -20,8 +20,10 @@ const ACKS: Record<string, string> = {
   coding: "Let me think about that.", planner: "Okay, working on it.", general: "One moment.",
 };
 import { ChatEvent, ChatSocket } from "./lib/ws";
-import { requestFrame } from "./lib/camera";
+import { photosChanged, requestFrame } from "./lib/camera";
 import { CameraPage } from "./pages/CameraPage";
+// The canvas loads with its tab, not with the app.
+const TeamsPage = lazy(() => import("./pages/TeamsPage").then((m) => ({ default: m.TeamsPage })));
 import { RoutinesPage } from "./pages/RoutinesPage";
 import { ActivityPage } from "./pages/ActivityPage";
 import { countSetupProblems, SetupPage } from "./pages/SetupPage";
@@ -297,13 +299,22 @@ export default function App() {
           if (e.speak && settingsRef.current?.voice?.tts_enabled) {
             enqueueSpeech(e.text, settingsRef.current.voice.tts_rate, settingsRef.current.voice.tts_voice);
           }
+          // An agent team reported back into this chat: show its message.
+          if (e.conversation_id) {
+            refreshConversations();
+            if (e.conversation_id === activeIdRef.current) {
+              api.messages(e.conversation_id).then(setMessages).catch(() => {});
+            }
+          }
           break;
         case "ui_request":
           // A tool needs the window itself, e.g. "open the camera and tell me
-          // what you see": show the Camera tab and hand back a photo.
-          if (e.kind === "camera_frame") {
+          // what you see" or "take a picture": show the Camera tab and hand
+          // back a photo (after a countdown for a picture being kept).
+          if (e.kind === "camera_frame" || e.kind === "camera_photo") {
             setPage("camera");
-            requestFrame().then(
+            const photo = e.kind === "camera_photo";
+            requestFrame(15000, { photo, countdown: photo ? e.countdown ?? 3 : 0 }).then(
               (image) => socket.uiResponse(e.id, { image }),
               (err: Error) => socket.uiResponse(e.id, { error: err.message }));
           } else {
@@ -333,6 +344,7 @@ export default function App() {
                            { name: e.name, status: "running" }]);
           break;
         case "tool_result": {
+          if (e.name === "take_photo" && !e.denied) photosChanged();
           const status: ToolChipInfo["status"] = e.denied ? "denied" : "done";
           setChips((c) => {
             const updated: ToolChipInfo[] = c.map((x) =>
@@ -827,6 +839,11 @@ export default function App() {
           />
         )}
         {page === "projects" && <ProjectsPage onOpenConversation={openConversation} />}
+        {page === "teams" && (
+          <Suspense fallback={<div className="page"><div className="page-inner"><div className="sub">Loading…</div></div></div>}>
+            <TeamsPage />
+          </Suspense>
+        )}
         {page === "skills" && <SkillsPage />}
         {page === "routines" && <RoutinesPage />}
         {page === "activity" && <ActivityPage />}

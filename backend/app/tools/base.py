@@ -11,6 +11,11 @@ User overrides in settings.permissions can relax "confirm" to "always" or
 block a tool entirely with "never". Dangerous tools can never be relaxed, and
 neither can a confirm tool marked always_ask (e.g. send_email: irreversible,
 but fine to use from the phone — dangerous tools are blocked there).
+
+A tool may also have a `prepare` step that runs BEFORE the permission check:
+it fills in what the user should see when asked (facetime_call looks up
+"Salah's business number", so the prompt shows the actual person and
+number), or returns a string to answer without running (nobody by that name).
 """
 from __future__ import annotations
 
@@ -32,6 +37,8 @@ class Tool:
     risk: str = "safe"                       # safe | confirm | dangerous
     agent_tags: list[str] = field(default_factory=list)
     always_ask: bool = False                 # confirm every time; can't be set to "always"
+    # args -> the args to confirm and run with, or a string to answer instead
+    prepare: Callable[[dict], Awaitable[dict | str] | dict | str] | None = None
 
     def to_ollama(self) -> dict:
         return {
@@ -53,6 +60,20 @@ class Tool:
 
     def is_blocked(self) -> bool:
         return settings.get(f"permissions.{self.name}") == "never"
+
+    async def prepare_args(self, args: dict) -> dict | str:
+        """The arguments to ask about and run with — or a string to answer
+        with instead of running (see `prepare`). Sync steps run in a thread."""
+        if self.prepare is None:
+            return args
+        try:
+            if inspect.iscoroutinefunction(self.prepare):
+                result = await self.prepare(dict(args))
+            else:
+                result = await asyncio.to_thread(self.prepare, dict(args))
+        except Exception as e:
+            return f"Error preparing {self.name}: {e}"
+        return result if isinstance(result, (dict, str)) else args
 
     async def run(self, **kwargs) -> str:
         if inspect.iscoroutinefunction(self.handler):
@@ -97,12 +118,13 @@ running_now: dict[str, float] = {}
 
 def tool(name: str, description: str, parameters: dict[str, Any],
          risk: str = "safe", agent_tags: list[str] | None = None,
-         always_ask: bool = False):
+         always_ask: bool = False, prepare: Callable | None = None):
     """Decorator used by built-in tools and plugins alike."""
     def wrap(fn):
         registry.register(Tool(name=name, description=description,
                                parameters=parameters, handler=fn, risk=risk,
-                               agent_tags=agent_tags or [], always_ask=always_ask))
+                               agent_tags=agent_tags or [], always_ask=always_ask,
+                               prepare=prepare))
         return fn
     return wrap
 
