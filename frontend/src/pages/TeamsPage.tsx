@@ -30,7 +30,8 @@ export function TeamsPage() {
   const [teams, setTeams] = useState<Team[] | null>(null);
   const [templates, setTemplates] = useState<TeamTemplate[]>([]);
   const [teamId, setTeamId] = useState<string>(() => localStorage.getItem("jarvis.team") ?? "");
-  const [browsing, setBrowsing] = useState(false);       // the list of teams instead of one team
+  const [browsing, setBrowsing] = useState(false);
+  const nameBefore = useRef("");       // the list of teams instead of one team
   const [team, setTeam] = useState<Team | null>(null);
   const [selected, setSelected] = useState<Selection>(null);
   const [tab, setTab] = useState<"inspect" | "results">("inspect");
@@ -350,10 +351,15 @@ export function TeamsPage() {
           <ArrowLeft /> All teams</button>
         <span className="tile-icon"><Workflow /></span>
         <div className="tp-team">
-          <select className="tp-team-select" value={team.id} aria-label="Team"
-                  onChange={(e) => setTeamId(e.target.value)}>
-            {(teams ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          <input className="tp-team-name" value={team.name} aria-label="Team name" title="Click to rename"
+                 spellCheck={false} size={Math.max(8, team.name.length + 1)}
+                 onChange={(e) => update({ ...team, name: e.target.value })}
+                 onKeyDown={(e) => {
+                   if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                   if (e.key === "Escape") { update({ ...team, name: nameBefore.current }); (e.target as HTMLInputElement).blur(); }
+                 }}
+                 onFocus={(e) => { nameBefore.current = team.name; e.target.select(); }}
+                 onBlur={() => { if (!team.name.trim()) update({ ...team, name: nameBefore.current || "New team" }, true); else flushSave(); }} />
           <span className="sub">{team.agents.length} agent{team.agents.length === 1 ? "" : "s"} ·
             you talk to {lead?.name}</span>
         </div>

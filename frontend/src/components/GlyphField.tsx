@@ -63,7 +63,7 @@ export function GlyphField() {
         for (let cx = 0; cx < cols; cx++) {
           const px = cx * CELL, py = cy * CELL;
           const i = cy * cols + cx;
-          let a = weight[i] * (0.045 + ink(cx, cy, still ? 0 : t) * 0.3);
+          let a = weight[i] * (0.075 + ink(cx, cy, still ? 0 : t) * 0.42);
           let lit = 0;
           for (const r of ripples) {
             const age = (now - r.born) / 1000;
@@ -76,7 +76,7 @@ export function GlyphField() {
             const along = px * 0.8 + py * 0.6;               // distance along the sweep's direction
             lit += Math.exp(-((along - sweep) ** 2) / 5000) * 0.45;
           }
-          a += lit * 0.7 * (0.4 + weight[i]);
+          a += lit * 0.85 * (0.4 + weight[i]);
           // Characters flicker now and then, and scramble where a ripple passes.
           if (!still && (Math.random() < 0.004 || (lit > 0.25 && Math.random() < 0.5))) {
             chars[i] = GLYPHS[(Math.random() * GLYPHS.length) | 0];

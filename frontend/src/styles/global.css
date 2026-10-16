@@ -1166,6 +1166,13 @@ input[type="range"] { accent-color: var(--accent); }
   padding: 2px 30px 2px 6px; margin-left: -6px; max-width: 360px; cursor: pointer; outline: none;
 }
 .tp-team-select:hover, .tp-team-select:focus-visible { background-color: var(--surface-2); }
+.tp-team-name {
+  font-family: var(--font-display); font-size: 16px; font-weight: 650; color: var(--text);
+  background: transparent; border: 1px solid transparent; border-radius: var(--r-sm);
+  padding: 2px 6px; margin-left: -6px; max-width: 360px; outline: none; cursor: text;
+}
+.tp-team-name:hover { background: var(--surface-2); }
+.tp-team-name:focus { background: var(--surface-2); border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
 .tp-menu-wrap { position: relative; }
 .tp-list-title { font-size: 13px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; margin: 22px 0 10px; }
 .tp-template.current { border-color: var(--accent-line); }
