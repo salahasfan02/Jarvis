@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft, ArrowUp, Bot, Check, ChevronDown, Crown, ExternalLink, FileCode, History, Plus, Save, Square, Trash2,
+  ArrowLeft, ArrowUp, Bot, Check, Link2, Users, ChevronDown, Crown, ExternalLink, FileCode, History, Plus, Save, Square, Trash2,
   Workflow, X,
 } from "lucide-react";
 import { api, ORIGIN } from "../lib/api";
@@ -10,8 +10,8 @@ import { AGENT_ICONS, Selection, TeamCanvas } from "../components/TeamCanvas";
 import { timeAgo } from "../lib/format";
 import {
   addAgent, AgentRun, applyEvent, canLink, COLORS, elapsed, emptyRun, fromSaved, ICONS, removeAgent,
-  RunState, RunSummary, runHeadline, sizeLabel, SKILLS, Skill, spotForNew, Team, TeamAgent, TeamTemplate,
-  uniqueName,
+  isSingle, RunState, RunSummary, runHeadline, sizeLabel, SKILLS, Skill, spotForNew, Team, TeamAgent,
+  TeamTemplate, uniqueName,
 } from "../lib/teams";
 import { followRun, teamsApi } from "../lib/teamsApi";
 
@@ -39,7 +39,7 @@ export function TeamsPage() {
   const [history, setHistory] = useState<RunSummary[]>([]);
   const [task, setTask] = useState("");
   const [models, setModels] = useState<{ names: string[]; active: string }>({ names: [], active: "" });
-  const [menu, setMenu] = useState<"" | "new" | "history">("");
+  const [menu, setMenu] = useState<"" | "new" | "history" | "import">("");
   const [armDelete, setArmDelete] = useState(false);
   const [, tick] = useState(0);
 
@@ -209,13 +209,36 @@ export function TeamsPage() {
     const rest = (teams ?? []).filter((t) => t.id !== team.id);
     setTeams(rest);
     setTeamId(rest[0]?.id ?? "");
-    toast("Team deleted");
+    toast(isSingle(team) ? "Agent deleted" : "Team deleted");
   };
 
   // ---- agents and links ----
   const running = run?.status === "running";
   const patchAgent = (id: string, patch: Partial<TeamAgent>) =>
-    team && update({ ...team, agents: team.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)) });
+    team && update({ ...team, ...(isSingle(team) && patch.name !== undefined ? { name: patch.name } : {}),
+                     agents: team.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)) });
+  const renameTeam = (name: string, now = false) =>
+    team && update({ ...team, name,
+                     agents: isSingle(team) ? [{ ...team.agents[0], name }] : team.agents }, now);
+  // Bring another agent or team in as a linked card: it stays in step with the original.
+  const importInto = (other: Team) => {
+    setMenu("");
+    if (!team) return;
+    if (team.agents.length >= 24) { toast("A team can have up to 24 agents", "error"); return; }
+    const sel = selected?.kind === "agent" ? selected.id : undefined;
+    const single = isSingle(other);
+    const made = addAgent(team, spotForNew(team, sel), {
+      name: other.name, ref: other.id, icon: single ? other.agents[0].icon : "team",
+      color: single ? other.agents[0].color : "#4fd1c5",
+    });
+    const from = sel ?? team.lead;
+    const linked = canLink(made.team, from, made.id)
+      ? { ...made.team, links: [...made.team.links, { from, to: made.id }] } : made.team;
+    update(linked, true);
+    setSelected({ kind: "agent", id: made.id });
+    setTab("inspect");
+    toast(`Linked ${other.name} — it stays in step with the original`);
+  };
   const addAgentAt = (x: number, y: number) => {
     if (!team) return;
     if (team.agents.length >= 24) { toast("A team can have up to 24 agents", "error"); return; }
@@ -282,28 +305,34 @@ export function TeamsPage() {
 
   const nameOf = useMemo(() => {
     const names = new Map((team?.agents ?? []).map((a) => [a.id, a.name]));
-    return (id: string) => names.get(id) ?? id;
-  }, [team?.agents]);
+    return (id: string) => names.get(id) ?? run?.names?.[id] ?? id;
+  }, [team?.agents, run?.names]);
+  const byTeamId = useMemo(() => new Map((teams ?? []).map((t) => [t.id, t])), [teams]);
 
   // ---- all teams (and a new one from a template) ----
   if (teams !== null && (teams.length === 0 || browsing)) {
     return (
       <div className="page">
         <div className="page-inner wide">
-          <PageHeader title="Agent teams">
-            Build a team of AI agents on a canvas: say what each one does and connect them. You talk
-            to one agent — it works out what's needed, briefs the others and brings their work together.
+          <PageHeader title="Agents">
+            Make an agent for a job, or a team of agents on a canvas — and bring agents and teams you
+            already have into a bigger team. Talk to any of them here, from the Core or Chat, or just
+            say “ask the IT team to …”.
           </PageHeader>
           {teams.length > 0 && (
             <>
-              <h3 className="tp-list-title">Your teams</h3>
+              <h3 className="tp-list-title">Your agents &amp; teams</h3>
               <div className="tp-templates">
                 {teams.map((t) => (
                   <button key={t.id} className={`tp-template ${t.id === teamId ? "current" : ""}`}
                           onClick={() => { setTeamId(t.id); setBrowsing(false); }}>
-                    <span className="tile-icon"><Workflow /></span>
-                    <h4>{t.name}</h4>
-                    <p>{t.description || `${t.agents.length} agent${t.agents.length === 1 ? "" : "s"}`}</p>
+                    {(() => {
+                      const Icon = isSingle(t) ? AGENT_ICONS[t.agents[0].icon] ?? Bot : Workflow;
+                      return <span className="tile-icon"><Icon /></span>;
+                    })()}
+                    <h4>{t.name} <span className="chip tp-kind">{isSingle(t) ? "Agent" : "Team"}</span></h4>
+                    <p>{t.description || (isSingle(t) ? (t.agents[0].role || "An agent of its own.")
+                        : `${t.agents.length} agents`)}</p>
                     <span className="tp-template-agents">
                       {t.agents.slice(0, 5).map((a) => <span key={a.id} className="chip">{a.name}</span>)}
                       {t.agents.length > 5 && <span className="chip">+{t.agents.length - 5}</span>}
@@ -312,10 +341,16 @@ export function TeamsPage() {
                   </button>
                 ))}
               </div>
-              <h3 className="tp-list-title">Start a new team</h3>
+              <h3 className="tp-list-title">Make a new one</h3>
             </>
           )}
           <div className="tp-templates">
+            <button className="tp-template" onClick={() => createTeam("agent")}>
+              <span className="tile-icon"><Bot /></span>
+              <h4>New agent</h4>
+              <p>One agent for one job — say what it does and whether it can research the web and
+                make files. Bring it into any team later.</p>
+            </button>
             {templates.map((t) => (
               <button key={t.id} className="tp-template" onClick={() => createTeam(t.id)}>
                 <span className="tile-icon"><Workflow /></span>
@@ -328,7 +363,7 @@ export function TeamsPage() {
             ))}
             <button className="tp-template blank" onClick={() => createTeam("")}>
               <span className="tile-icon"><Plus /></span>
-              <h4>Start from scratch</h4>
+              <h4>Blank team</h4>
               <p>One agent to begin with — add more and connect them on the canvas.</p>
             </button>
           </div>
@@ -340,28 +375,30 @@ export function TeamsPage() {
 
   const lead = team.agents.find((a) => a.id === team.lead) ?? team.agents[0];
   const LeadIcon = AGENT_ICONS[lead?.icon ?? "bot"] ?? Bot;
-  const agent = selected?.kind === "agent" ? team.agents.find((a) => a.id === selected.id) : undefined;
+  const single = isSingle(team);
+  const agent = selected?.kind === "agent" ? team.agents.find((a) => a.id === selected.id)
+    : single && !selected ? team.agents[0] : undefined;
   const runSeconds = run ? (run.finishedAt ?? Date.now() / 1000) - run.createdAt : 0;
 
   return (
     <div className="teams-page">
       <div className="tp-head">
-        <button className="btn sm ghost" title="All teams" aria-label="Back to all teams"
+        <button className="btn sm ghost" title="All agents and teams" aria-label="Back to all agents"
                 onClick={async () => { await flushSave(); setSelected(null); setBrowsing(true); }}>
-          <ArrowLeft /> All teams</button>
+          <ArrowLeft /> All agents</button>
         <span className="tile-icon"><Workflow /></span>
         <div className="tp-team">
           <input className="tp-team-name" value={team.name} aria-label="Team name" title="Click to rename"
                  spellCheck={false} size={Math.max(8, team.name.length + 1)}
-                 onChange={(e) => update({ ...team, name: e.target.value })}
+                 onChange={(e) => renameTeam(e.target.value)}
                  onKeyDown={(e) => {
                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                   if (e.key === "Escape") { update({ ...team, name: nameBefore.current }); (e.target as HTMLInputElement).blur(); }
+                   if (e.key === "Escape") { renameTeam(nameBefore.current); (e.target as HTMLInputElement).blur(); }
                  }}
                  onFocus={(e) => { nameBefore.current = team.name; e.target.select(); }}
-                 onBlur={() => { if (!team.name.trim()) update({ ...team, name: nameBefore.current || "New team" }, true); else flushSave(); }} />
-          <span className="sub">{team.agents.length} agent{team.agents.length === 1 ? "" : "s"} ·
-            you talk to {lead?.name}</span>
+                 onBlur={() => { if (!team.name.trim()) renameTeam(nameBefore.current || "New team", true); else flushSave(); }} />
+          <span className="sub">{isSingle(team) ? "Agent · it does the work itself"
+            : `${team.agents.length} agents · you talk to ${lead?.name}`}</span>
         </div>
         <div className="grow" />
         <span className={`tp-save ${saveState}`} role="status" aria-live="polite">
@@ -376,6 +413,31 @@ export function TeamsPage() {
           const p = spotForNew(team, sel);
           addAgentAt(p.x, p.y);
         }}><Plus /> Add agent</button>
+        <div className="tp-menu-wrap">
+          <button className="btn sm tp-menu-btn" onClick={() => setMenu(menu === "import" ? "" : "import")}
+                  title="Bring in one of your agents or teams" aria-expanded={menu === "import"}>
+            <Link2 /> Import <ChevronDown /></button>
+          {menu === "import" && (
+            <div className="tp-menu" role="menu">
+              {(teams ?? []).filter((t) => t.id !== team.id).length === 0 && (
+                <div className="tp-menu-empty">Make another agent or team first — then bring it in here.</div>
+              )}
+              {(teams ?? []).filter((t) => t.id !== team.id).map((t) => {
+                const Icon = isSingle(t) ? AGENT_ICONS[t.agents[0].icon] ?? Bot : Users;
+                const already = team.agents.some((a) => a.ref === t.id);
+                return (
+                  <div key={t.id} className={`tp-menu-item tall ${already ? "muted" : ""}`} role="menuitem" tabIndex={0}
+                       onClick={() => importInto(t)} onKeyDown={(e) => e.key === "Enter" && importInto(t)}>
+                    <span className="tp-agent-icon" style={{ background: isSingle(t) ? t.agents[0].color || "var(--accent)" : "#4fd1c5" }}><Icon /></span>
+                    <span className="grow"><b>{t.name}</b>
+                      <span className="sub">{isSingle(t) ? "Agent" : `Team of ${t.agents.length}`}
+                        {already ? " · already in this team" : ""}</span></span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <div className="tp-menu-wrap">
           <button className="btn sm tp-menu-btn" onClick={() => setMenu(menu === "history" ? "" : "history")}
                   aria-expanded={menu === "history"}><History /> Runs <ChevronDown /></button>
@@ -399,9 +461,13 @@ export function TeamsPage() {
         </div>
         <div className="tp-menu-wrap">
           <button className="btn sm tp-menu-btn" onClick={() => setMenu(menu === "new" ? "" : "new")}
-                  aria-expanded={menu === "new"}><Plus /> New team <ChevronDown /></button>
+                  aria-expanded={menu === "new"}><Plus /> New <ChevronDown /></button>
           {menu === "new" && (
             <div className="tp-menu" role="menu">
+              <div className="tp-menu-item tall" role="menuitem" tabIndex={0}
+                   onClick={() => createTeam("agent")} onKeyDown={(e) => e.key === "Enter" && createTeam("agent")}>
+                <span className="grow"><b>Agent</b><span className="sub">One agent for one job.</span></span>
+              </div>
               {templates.map((t) => (
                 <div key={t.id} className="tp-menu-item tall" role="menuitem" tabIndex={0}
                      onClick={() => createTeam(t.id)} onKeyDown={(e) => e.key === "Enter" && createTeam(t.id)}>
@@ -410,20 +476,21 @@ export function TeamsPage() {
               ))}
               <div className="tp-menu-item tall" role="menuitem" tabIndex={0}
                    onClick={() => createTeam("")} onKeyDown={(e) => e.key === "Enter" && createTeam("")}>
-                <span className="grow"><b>Blank team</b><span className="sub">One agent — build the rest yourself.</span></span>
+                <span className="grow"><b>Blank team</b><span className="sub">Start with one agent and build the team yourself.</span></span>
               </div>
             </div>
           )}
         </div>
-        <button className="icon-btn" title={armDelete ? "Click again to delete this team" : "Delete team"}
-                aria-label={armDelete ? "Confirm delete team" : "Delete team"}
+        <button className="icon-btn" title={armDelete ? "Click again to delete it" : `Delete ${isSingle(team) ? "agent" : "team"}`}
+                aria-label={armDelete ? "Confirm delete" : `Delete ${isSingle(team) ? "agent" : "team"}`}
                 style={armDelete ? { color: "var(--danger)" } : undefined} onClick={deleteTeam}><Trash2 /></button>
       </div>
 
       <div className="tp-body">
         <TeamCanvas team={team} run={run} selected={selected}
                     onSelect={(sel) => { setSelected(sel); if (sel) setTab("inspect"); }}
-                    onMoveAgent={move} onLink={link} onAddAgent={addAgentAt} onDelete={remove} />
+                    onMoveAgent={move} onLink={link} onAddAgent={addAgentAt} onDelete={remove}
+                    linked={byTeamId} />
 
         <aside className="tp-side" aria-label="Details">
           <div className="seg tp-tabs" role="tablist">
@@ -435,7 +502,14 @@ export function TeamsPage() {
             </button>
           </div>
           <div className="tp-side-body" ref={side}>
-            {tab === "inspect" && agent && (
+            {tab === "inspect" && agent?.ref && (
+              <LinkedInspector team={team} card={agent} linked={byTeamId.get(agent.ref)}
+                               onPatch={(p) => patchAgent(agent.id, p)}
+                               onLead={() => update({ ...team, lead: agent.id })}
+                               onOpen={async () => { await flushSave(); setSelected(null); setTeamId(agent.ref!); }}
+                               onDelete={() => remove({ kind: "agent", id: agent.id })} />
+            )}
+            {tab === "inspect" && agent && !agent.ref && (
               <AgentInspector team={team} agent={agent} models={models} state={run?.agents[agent.id]}
                               nameOf={nameOf} onPatch={(p) => patchAgent(agent.id, p)}
                               onLead={() => update({ ...team, lead: agent.id })}
@@ -455,12 +529,12 @@ export function TeamsPage() {
                 <button className="btn danger sm" onClick={() => remove(selected)}><X /> Remove connection</button>
               </div>
             )}
-            {tab === "inspect" && !selected && (
+            {tab === "inspect" && !selected && !single && (
               <div className="tp-inspector">
                 <label className="form-field">Team name
                   <input type="text" value={team.name} maxLength={60}
-                         onChange={(e) => update({ ...team, name: e.target.value })}
-                         onBlur={() => !team.name.trim() && update({ ...team, name: "New team" })} />
+                         onChange={(e) => renameTeam(e.target.value)}
+                         onBlur={() => !team.name.trim() && renameTeam("New team")} />
                 </label>
                 <label className="form-field">What it's for
                   <textarea rows={2} value={team.description} maxLength={500} placeholder="Optional"
@@ -489,8 +563,9 @@ export function TeamsPage() {
                     })}
                   </div>
                 </div>
-                <div className="sub">Double-click the canvas to add an agent. Drag from an agent's right-hand
-                  dot to another agent to connect them; select a connection and press Delete to remove it.</div>
+                <div className="sub">Double-click the canvas to add an agent, or <b>Import</b> one of your
+                  agents or teams. Drag from an agent's right-hand dot to another agent to connect them;
+                  select a connection and press Delete to remove it.</div>
               </div>
             )}
             {tab === "results" && (
@@ -536,11 +611,54 @@ export function TeamsPage() {
               )}
             </>
           ) : (
-            <span className="muted">Your request goes to {lead?.name}, who briefs the rest of the team —
-              e.g. “build a landing page and a launch plan for my dog-walking app”. Agents can research
-              the web and save files; nothing else on your Mac is touched.</span>
+            <span className="muted">{single
+              ? <>Your request goes straight to {lead?.name}. Agents can research the web and save
+                  files; nothing else on your Mac is touched. You can also talk to it from the Core or
+                  Chat (“Talk to”), or say “ask {lead?.name} to …”.</>
+              : <>Your request goes to {lead?.name}, who briefs the rest of the team — e.g. “build a
+                  landing page and a launch plan for my dog-walking app”. Agents can research the web
+                  and save files; nothing else on your Mac is touched.</>}</span>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** A linked agent or team on this canvas: it's edited where it lives. */
+function LinkedInspector(props: {
+  team: Team;
+  card: TeamAgent;
+  linked?: Team;
+  onPatch: (p: Partial<TeamAgent>) => void;
+  onLead: () => void;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  const { team, card, linked } = props;
+  const single = linked ? isSingle(linked) : false;
+  return (
+    <div className="tp-inspector">
+      <label className="form-field">Name in this team
+        <input type="text" value={card.name} maxLength={40}
+               onChange={(e) => props.onPatch({ name: e.target.value })} />
+      </label>
+      {linked ? (
+        <div className="tp-brief">
+          <span>{single ? "Linked agent" : `Linked team · ${linked.agents.length} agents`}</span>
+          <p><b>{linked.name}</b>{linked.description ? ` — ${linked.description}` : ""}</p>
+          {single && linked.agents[0].role && <p className="sub">{linked.agents[0].role}</p>}
+          {!single && <p className="sub">{linked.agents.map((a) => a.name).join(" · ")}</p>}
+        </div>
+      ) : (
+        <p className="sub" style={{ color: "var(--danger)" }}>The {"agent or team"} this card linked to was deleted.</p>
+      )}
+      <p className="sub">It stays linked: change it in Agents and this team uses the new version.
+        {single ? " It gets the brief and does the work." : " Its own lead gets the brief and runs its team."}</p>
+      <div className="form-actions" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
+        {linked && <button className="btn sm" onClick={props.onOpen}><ExternalLink /> Open {linked.name}</button>}
+        {team.lead !== card.id && <button className="btn sm ghost" onClick={props.onLead}><Crown /> Talk to it first</button>}
+        <button className="btn sm danger" onClick={props.onDelete}><X /> Remove from this team</button>
       </div>
     </div>
   );
@@ -579,7 +697,7 @@ function AgentInspector(props: {
                  if (name !== agent.name) props.onPatch({ name });
                }} />
       </div>
-      <label className="tp-toggle">
+      {team.agents.length > 1 && <label className="tp-toggle">
         <span className="switch">
           <input type="checkbox" checked={lead} disabled={lead} onChange={props.onLead} />
           <span />
@@ -587,7 +705,7 @@ function AgentInspector(props: {
         <span><b>You talk to this agent</b><span className="sub">{lead
           ? "It gets your requests and briefs its team."
           : `Make it the one you talk to (now: ${props.nameOf(team.lead)}).`}</span></span>
-      </label>
+      </label>}
       <label className="form-field">What it does
         <textarea rows={7} value={agent.role} maxLength={4000}
                   placeholder={outgoing.length

@@ -1176,6 +1176,10 @@ input[type="range"] { accent-color: var(--accent); }
 .tp-menu-wrap { position: relative; }
 .tp-list-title { font-size: 13px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; margin: 22px 0 10px; }
 .tp-template.current { border-color: var(--accent-line); }
+.tp-kind { font-size: 11px; font-weight: 500; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
+.tp-menu-item.muted { opacity: .6; }
+.tp-menu-item .tp-agent-icon { flex-shrink: 0; }
+.tc-chip.linked { color: var(--accent-text); border-color: var(--accent-line); }
 .tp-updated { font-size: 12px; margin-top: auto; }
 .tp-save { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
 .tp-save .lucide { width: 13px; height: 13px; }
@@ -1422,3 +1426,32 @@ input[type="range"] { accent-color: var(--accent); }
   .tp-side { width: auto; height: 46%; border-left: none; border-top: 1px solid var(--line); }
   .tp-head { flex-wrap: wrap; }
 }
+
+/* "Talk to" — who a message goes to (Core and Chat) */
+.talk-to { position: relative; display: flex; justify-content: center; }
+.talk-to-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px;
+  font-size: 12.5px; color: var(--text-2); background: var(--surface); border: 1px solid var(--line);
+  cursor: pointer; white-space: nowrap;
+}
+.talk-to-btn .lucide { width: 14px; height: 14px; }
+.talk-to-btn .lucide:last-child { width: 12px; height: 12px; opacity: .7; }
+.talk-to-btn b { color: var(--text); font-weight: 600; }
+.talk-to-btn:hover { border-color: var(--line-2); }
+.talk-to-btn.on { border-color: var(--accent-line); background: var(--accent-softer); }
+.talk-to-btn.on .lucide:first-child { color: var(--accent-text); }
+.talk-to-menu {
+  position: absolute; top: calc(100% + 6px); z-index: 40; width: 320px; max-height: 360px; overflow-y: auto;
+  padding: 4px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-lg); animation: modalIn var(--fast) var(--ease); text-align: left;
+}
+.talk-to.up .talk-to-menu { top: auto; bottom: calc(100% + 6px); }
+.workspace-header .talk-to .talk-to-menu { right: 0; }
+.talk-to-item { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: var(--r-sm); cursor: pointer; font-size: 13px; }
+.talk-to-item:hover, .talk-to-item:focus-visible { background: var(--surface-2); outline: none; }
+.talk-to-item > .lucide { width: 15px; height: 15px; color: var(--accent-text); flex-shrink: 0; }
+.talk-to-item .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.talk-to-item .sub { font-size: 11.5px; }
+.talk-to-label { padding: 8px 9px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); }
+.talk-to-empty { padding: 10px; font-size: 12.5px; color: var(--text-3); }
+.dash .talk-to, .core-wrap .talk-to { margin-bottom: 10px; }

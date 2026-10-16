@@ -5,6 +5,11 @@ what it does), skills (which tools it may use) and a place on the canvas; a
 link A -> B means "A can hand work to B". The user talks to one agent, the
 lead, and it gets the right work to the right teammates (engine.py).
 
+A single agent is a team of one. A team can also take in another of the
+user's agents or teams as a linked card (an agent with `ref` = that team's
+id): it stays linked, so changes to the original carry over, and expand()
+unfolds it into its real agents when a run starts.
+
 Each team is one JSON document, so the canvas can grow new fields without
 migrations. Runs keep what every agent was asked and produced.
 """
@@ -21,7 +26,8 @@ from .. import db
 
 SKILLS = ("research", "files")
 ICONS = ("crown", "server", "layout", "megaphone", "search", "pen", "bot", "code", "chart",
-         "palette", "brain", "shield")
+         "palette", "brain", "shield", "team")
+MAX_DEPTH_LINKED = 3            # a team inside a team inside a team, no deeper
 MAX_AGENTS = 24
 MAX_ROLE = 4000
 
@@ -239,6 +245,10 @@ TEMPLATES: dict[str, dict] = {
             "developer", "sql", "assets", "docs")],
     },
 }
+AGENT = {"name": "New agent", "description": "", "lead": "agent",
+         "agents": [{"id": "agent", "name": "New agent", "icon": "bot", "color": "#5aa9ff",
+                     "x": 80, "y": 160, "skills": ["research", "files"], "role": ""}],
+         "links": []}
 BLANK = {"name": "New team", "description": "", "lead": "lead",
          "agents": [{"id": "lead", "name": "Main agent", "icon": "crown", "color": "#f5b041",
                      "x": 80, "y": 160, "skills": [], "role": ""}],
@@ -287,8 +297,10 @@ def normalize(data: dict) -> dict:
         name = unique_name(_text(raw.get("name"), 40) or "Agent", names)
         color = str(raw.get("color") or "")
         icon = str(raw.get("icon") or "")
+        ref = str(raw.get("ref") or "")
         agents.append({
             "id": aid, "name": name,
+            **({"ref": ref} if re.fullmatch(r"[0-9a-f]{32}", ref) else {}),
             "role": _text(raw.get("role"), MAX_ROLE, lines=True),
             "skills": [s for s in SKILLS if s in (raw.get("skills") or [])],
             "model": _text(raw.get("model"), 120),
@@ -339,10 +351,13 @@ def get(team_id: str) -> dict | None:
 
 
 def create(name: str = "", template: str = "") -> dict:
+    """template: a TEMPLATES key, "agent" for a single agent, or "" for a blank team."""
     _ensure()
-    doc = copy.deepcopy(TEMPLATES.get(template) or BLANK)
+    doc = copy.deepcopy(AGENT if template == "agent" else TEMPLATES.get(template) or BLANK)
     if name.strip():
         doc["name"] = name
+        if template == "agent":
+            doc["agents"][0]["name"] = name
     doc = normalize(doc)
     taken = {t["name"].lower() for t in list_teams()}
     doc["name"] = unique_name(doc["name"], taken)
@@ -379,23 +394,68 @@ def _key(name: str) -> str:
     return re.sub(r"[^\w]+", " ", s).strip()
 
 
+def is_single(team: dict) -> bool:
+    """One agent of its own (not a linked team): shown and spoken of as an agent."""
+    return len(team.get("agents") or []) == 1 and not team["agents"][0].get("ref")
+
+
 def find(name: str = "") -> dict | str:
-    """The team the user means ("my startup team"), or why there isn't one."""
+    """The agent or team the user means ("my startup team", "the writer agent",
+    or its id), or why there isn't one."""
     teams = list_teams()
     if not teams:
-        return ("There are no agent teams yet — the user can build one in the Agent teams "
-                "tab (there's a ready-made Startup team).")
+        return ("There are no agents or teams yet — the user can make them in the Agents "
+                "tab (there are ready-made Startup and IT teams).")
+    if name and (by_id := next((t for t in teams if t["id"] == name), None)):
+        return by_id
     want = _key(name or "")
     if not want:
         if len(teams) == 1:
             return teams[0]
-        return "Which team? There are: " + ", ".join(t["name"] for t in teams) + "."
+        return "Which one? There are: " + ", ".join(t["name"] for t in teams) + "."
     for test in (lambda k: k == want, lambda k: want in k or k in want):
         hits = [t for t in teams if _key(t["name"]) and test(_key(t["name"]))]
         if len(hits) == 1:
             return hits[0]
-    return (f"There's no team called {name}. The teams are: "
+    return (f"There's no agent or team called {name}. There are: "
             + ", ".join(t["name"] for t in teams) + ".")
+
+
+def expand(team: dict, _seen: tuple[str, ...] = ()) -> dict:
+    """The team with every linked agent or team unfolded into its real agents,
+    ready to run. A linked team's agents get ids under the card's ("card.agent"),
+    its lead takes the card's name (that's what the team planning sees), links to
+    the card go to that lead, and links out of the card start from it. A card
+    whose team is gone, or that would loop back, is left out."""
+    seen = (*_seen, team.get("id", ""))
+    agents, links, lead = [], [dict(l) for l in team["links"]], team["lead"]
+    for card in team["agents"]:
+        ref = card.get("ref")
+        if not ref:
+            agents.append(card)
+            continue
+        inner = get(ref) if ref not in seen and len(seen) <= MAX_DEPTH_LINKED else None
+        if inner is None or not inner["agents"]:
+            links = [l for l in links if card["id"] not in (l["from"], l["to"])]
+            if lead == card["id"]:
+                lead = ""
+            continue
+        inner = expand(inner, seen)
+        pre = card["id"] + "."
+        inner_lead = pre + inner["lead"]
+        for a in inner["agents"]:
+            a = {**a, "id": pre + a["id"]}
+            if a["id"] == inner_lead:
+                a["name"] = card["name"]
+            agents.append(a)
+        links = [{"from": inner_lead if l["from"] == card["id"] else l["from"],
+                  "to": inner_lead if l["to"] == card["id"] else l["to"]} for l in links]
+        links += [{"from": pre + l["from"], "to": pre + l["to"]} for l in inner["links"]]
+        if lead == card["id"]:
+            lead = inner_lead
+    if lead not in {a["id"] for a in agents}:
+        lead = agents[0]["id"] if agents else ""
+    return {**team, "agents": agents, "links": links, "lead": lead}
 
 
 # ---- runs ------------------------------------------------------------------------------

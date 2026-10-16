@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { API, statsApi, SystemStats } from "../lib/api";
 import { LightInfo, LightRow } from "../components/LightsPanel";
+import { TalkTo } from "../components/TalkTo";
 import { voiceBus } from "../lib/voice";
 import { Core, CoreDesign, CoreMode } from "../components/Core";
 import { Answer, ToolChipInfo } from "../components/ChatView";
@@ -59,6 +60,8 @@ export function DashboardPage(props: {
   listening: boolean;
   assistantName: string;
   onCommand: (text: string) => void;
+  talkTo: { id: string; name: string };
+  onTalkTo: (id: string, name: string) => void;
   onStop: () => void;
   onOpenChat: () => void;
   lastUser: string | null;
@@ -194,6 +197,7 @@ export function DashboardPage(props: {
           </div>
         )}
 
+        <TalkTo value={props.talkTo.id} onChange={props.onTalkTo} />
         <form className="command" onSubmit={(e) => { e.preventDefault(); submit(); }}>
           {props.voiceSupported && (
             <button type="button" className={`icon-btn ${props.voiceState === "listening" ? "recording" : ""}`}
@@ -201,7 +205,8 @@ export function DashboardPage(props: {
               <Mic />
             </button>
           )}
-          <input placeholder={`Ask ${props.assistantName} anything…`} value={command}
+          <input placeholder={props.talkTo.id ? `Tell ${props.talkTo.name} what you need…`
+                                                : `Ask ${props.assistantName} anything…`} value={command}
                  aria-label="Command" onChange={(e) => setCommand(e.target.value)} />
           {props.voiceSupported && (
             <button type="button" className={`icon-btn ${props.wakeActive ? "wake-on" : ""}`}

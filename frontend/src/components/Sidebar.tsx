@@ -13,7 +13,7 @@ export const NAV: { id: Page; icon: LucideIcon; label: string; group: "" | "Assi
   { id: "core", icon: Orbit, label: "Core", group: "" },
   { id: "chat", icon: MessagesSquare, label: "Chat", group: "" },
   { id: "projects", icon: Folder, label: "Projects", group: "Assistant" },
-  { id: "teams", icon: Workflow, label: "Agent teams", group: "Assistant" },
+  { id: "teams", icon: Workflow, label: "Agents", group: "Assistant" },
   { id: "routines", icon: AlarmClock, label: "Routines", group: "Assistant" },
   { id: "memory", icon: Brain, label: "Memory", group: "Assistant" },
   { id: "skills", icon: Sparkles, label: "Skills", group: "Assistant" },

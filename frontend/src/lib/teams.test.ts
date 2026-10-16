@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isSingle,
   addAgent, applyEvent, canLink, defaultLead, elapsed, emptyRun, fitView, fromSaved, linkMid, linkPath,
   NODE_H, NODE_W, reachable, removeAgent, runHeadline, spotForNew, Team, uniqueName,
 } from "./teams";
@@ -137,5 +138,17 @@ describe("following a run", () => {
     expect(s.agents.backend.tools[0].status).toBe("done");
     expect(s.agents.backend.plan).toBe("");
     expect(s.active).toBeNull();
+  });
+});
+
+describe("agents and linked teams", () => {
+  it("knows a single agent from a team, and names agents inside linked teams", () => {
+    const one = { id: "t", name: "Writer", description: "", lead: "a", links: [],
+                  agents: [{ id: "a", name: "Writer", role: "", skills: [], model: "", x: 0, y: 0, color: "", icon: "pen" }] };
+    expect(isSingle(one as any)).toBe(true);
+    expect(isSingle({ ...one, agents: [{ ...one.agents[0], ref: "x".repeat(32) }] } as any)).toBe(false);
+    const run = applyEvent(emptyRun(), { type: "run", run_id: "r", team_id: "t", task: "go",
+                                          names: { "w.writer": "Writer" } });
+    expect(run.names["w.writer"]).toBe("Writer");
   });
 });

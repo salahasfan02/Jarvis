@@ -1,7 +1,8 @@
 import { CSSProperties, PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Bot, Brain, ChartNoAxesColumn, Check, Code, Crown, Globe, LayoutTemplate, LocateFixed, LucideIcon,
-  Megaphone, Minus, PenLine, Palette, Plus, Search, Server, Shield, TriangleAlert, X, FileCode,
+  Link2, Megaphone, Minus, PenLine, Palette, Plus, Search, Server, Shield, TriangleAlert, Users, X,
+  FileCode,
 } from "lucide-react";
 import {
   canLink, fitView, linkMid, linkPath, NODE_H, NODE_W, portIn, portOut, reachable, RunState, Team, TeamAgent,
@@ -10,8 +11,23 @@ import {
 export const AGENT_ICONS: Record<string, LucideIcon> = {
   crown: Crown, server: Server, layout: LayoutTemplate, megaphone: Megaphone, search: Search,
   pen: PenLine, bot: Bot, code: Code, chart: ChartNoAxesColumn, palette: Palette, brain: Brain,
-  shield: Shield,
+  shield: Shield, team: Users,
 };
+
+/** A run's agent ids inside a linked card are "card.agent": on this canvas they're the card. */
+const top = (id: string) => id.split(".")[0];
+
+/** A linked card's state: the busiest of the agents inside it. */
+const RANK: Record<string, number> = { planning: 6, working: 6, waiting: 5, error: 4, stopped: 3, done: 2, idle: 1 };
+function cardState(run: RunState | null, id: string) {
+  if (!run) return undefined;
+  const inside = Object.entries(run.agents).filter(([k]) => k.startsWith(id + "."));
+  if (!inside.length) return run.agents[id];
+  inside.sort((a, b) => (RANK[b[1].status] ?? 0) - (RANK[a[1].status] ?? 0));
+  const best = inside[0][1];
+  const allDone = inside.every(([, v]) => v.status === "done");
+  return { ...best, status: allDone ? "done" : best.status };
+}
 
 export type Selection = { kind: "agent"; id: string } | { kind: "link"; from: string; to: string } | null;
 
@@ -38,6 +54,7 @@ export function TeamCanvas(props: {
   onLink: (from: string, to: string) => void;
   onAddAgent: (x: number, y: number) => void;
   onDelete: (sel: Selection) => void;
+  linked?: Map<string, Team>;      // every agent and team, for linked cards
 }) {
   const { team, run, selected } = props;
   const viewport = useRef<HTMLDivElement>(null);
@@ -179,7 +196,7 @@ export function TeamCanvas(props: {
 
   const byId = useMemo(() => new Map(team.agents.map((a) => [a.id, a])), [team.agents]);
   const live = useMemo(() => reachable(team), [team]);
-  const used = useMemo(() => new Set((run?.handoffs ?? []).map((h) => `${h.from}>${h.to}`)), [run?.handoffs]);
+  const used = useMemo(() => new Set((run?.handoffs ?? []).map((h) => `${top(h.from)}>${top(h.to)}`)), [run?.handoffs]);
 
   // The SVG covers every agent (and a link being drawn), so links stay clickable anywhere.
   const box = useMemo(() => {
@@ -219,7 +236,7 @@ export function TeamCanvas(props: {
             if (!a || !b) return null;
             const d = linkPath(portOut(a), portIn(b));
             const isSel = selected?.kind === "link" && selected.from === l.from && selected.to === l.to;
-            const active = run?.active && run.active.from === l.from && run.active.to === l.to;
+            const active = run?.active && top(run.active.from) === l.from && top(run.active.to) === l.to;
             const color = b.color || "var(--accent)";
             return (
               <g key={`${l.from}>${l.to}`}
@@ -254,8 +271,11 @@ export function TeamCanvas(props: {
         })()}
 
         {team.agents.map((a) => {
-          const Icon = AGENT_ICONS[a.icon] ?? Bot;
-          const state = run?.agents[a.id];
+          const linked = a.ref ? props.linked?.get(a.ref) : undefined;
+          const linkedSingle = linked && linked.agents.length === 1 && !linked.agents[0].ref;
+          const Icon = a.ref ? (linkedSingle ? AGENT_ICONS[linked!.agents[0].icon] ?? Bot : Users)
+            : AGENT_ICONS[a.icon] ?? Bot;
+          const state = a.ref ? cardState(run, a.id) : run?.agents[a.id];
           const status = state?.status ?? "idle";
           const lead = team.lead === a.id;
           return (
@@ -273,13 +293,22 @@ export function TeamCanvas(props: {
                 {status === "error" && <TriangleAlert className="tc-err" aria-label="Couldn't finish" />}
                 {(status === "planning" || status === "working") && <span className="spinner" aria-label="Working" />}
               </div>
-              <div className={`tc-node-role ${a.role ? "" : "muted"}`}>
-                {a.role || "Select it, then say what this agent does."}
-              </div>
+              {a.ref ? (
+                <div className={`tc-node-role ${linked ? "" : "muted"}`}>
+                  {!linked ? "The linked agent or team was deleted."
+                    : linkedSingle ? (linked.agents[0].role || `${linked.name}, linked from Agents.`)
+                    : `${linked.agents.length} agents${linked.description ? ` · ${linked.description}` : ""}`}
+                </div>
+              ) : (
+                <div className={`tc-node-role ${a.role ? "" : "muted"}`}>
+                  {a.role || "Select it, then say what this agent does."}
+                </div>
+              )}
               <div className="tc-node-foot">
                 {lead && <span className="tc-chip lead"><Crown /> You talk to it</span>}
-                {a.skills.includes("research") && <span className="tc-chip"><Globe /> Research</span>}
-                {a.skills.includes("files") && <span className="tc-chip"><FileCode /> Files</span>}
+                {a.ref && <span className="tc-chip linked"><Link2 /> {linkedSingle ? "Linked agent" : "Linked team"}</span>}
+                {!a.ref && a.skills.includes("research") && <span className="tc-chip"><Globe /> Research</span>}
+                {!a.ref && a.skills.includes("files") && <span className="tc-chip"><FileCode /> Files</span>}
                 {!live.has(a.id) && <span className="tc-chip warn">Not connected</span>}
               </div>
               {state && state.status !== "idle" && state.status !== "done" && (

@@ -14,6 +14,7 @@ Emits event dicts consumed by the WebSocket layer:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import datetime
 import functools
 import json
@@ -683,12 +684,21 @@ async def assemble(conversation_id: str, conv: dict, agent: agents.Agent,
 
 
 async def run_chat(conversation_id: str, user_content: str,
-                   spoken: bool = False) -> AsyncIterator[dict]:
+                   spoken: bool = False, target: str = "") -> AsyncIterator[dict]:
+    """target: the id of an agent or team picked in the app ("Talk to …") — the
+    message goes straight to it instead of to Jarvis."""
     started = time.perf_counter()
     channels.conversation.set(conversation_id)   # "send me the whole chat"
     db.add_message(conversation_id, "user", user_content)
     history = db.get_messages(conversation_id)
     conv = db.get_conversation(conversation_id) or {}
+
+    if target:
+        _picked.set(target)
+        action = quick.QuickAction("run_agent_team", {"task": user_content, "team": target}, "")
+        async for event in _run_quick(conversation_id, user_content, action, history, started):
+            yield event
+        return
 
     # Instant commands ("open youtube", "pause") skip the model entirely.
     if conv.get("mode") != "code" and quick.enabled():
@@ -1286,6 +1296,20 @@ async def _plan_summary(goal: str, steps: list[str], results: list[str]) -> str:
 
 
 _ASKED_TO_SEND = re.compile(r"\b(?:send|text)\b", re.I)
+_picked: contextvars.ContextVar[str] = contextvars.ContextVar("picked_team", default="")
+
+
+def _asked_for_team(asked: str, team_ref: str) -> bool:
+    """They picked this agent or team in the app, or named it themselves ("ask
+    the IT team to …") — asking "shall I?" again protects nothing."""
+    if team_ref and _picked.get() == team_ref:
+        return True
+    from ..teams import store
+    found = store.find(team_ref)
+    if not isinstance(found, dict):
+        return False
+    key = store._key(found["name"])
+    return bool(key) and re.search(rf"\b{re.escape(key)}\b", store._key(asked) or asked.lower()) is not None
 
 
 def _music_service(user_content: str, name: str, args: dict) -> tuple[str, dict]:
@@ -1386,6 +1410,10 @@ async def _execute_with_permission(name: str, args: dict, tool_events: list[dict
         denied, denied_label = True, "Not allowed in routines"
         output = (f"'{name}' controls the screen, which routines never do. Say what the "
                   "user should do instead.")
+    elif (name == "run_agent_team" and not getattr(channel, "auto_approve", False)
+          and _asked_for_team(asked, str(args.get("team", "")))):
+        yield {"type": "tool_start", "name": name, "arguments": args}
+        output = await tools.execute(name, args)
     elif (name in ("send_file", "send_to_phone") and _ASKED_TO_SEND.search(asked)
           and not getattr(channel, "auto_approve", False)):
         # They asked for it to be sent to them, and it can only go to their own

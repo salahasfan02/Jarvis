@@ -54,8 +54,10 @@ export class ChatSocket {
   }
 
   chat(conversationId: string | null, content: string, mode: "chat" | "code" = "chat",
-       voice = false) {
-    this.send({ type: "chat", conversation_id: conversationId, content, mode, voice });
+       voice = false, target = "") {
+    // target: an agent or team picked under "Talk to" — the message goes straight to it.
+    this.send({ type: "chat", conversation_id: conversationId, content, mode, voice,
+                ...(target ? { target } : {}) });
   }
 
   confirm(id: string, approved: boolean, tool?: string, remember?: boolean) {

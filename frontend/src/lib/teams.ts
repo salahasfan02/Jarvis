@@ -7,7 +7,7 @@ export const SKILLS: { id: Skill; label: string; hint: string }[] = [
   { id: "files", label: "Make files", hint: "Writes code, pages and documents to the team's workspace — a web page saved there goes live" },
 ];
 export const ICONS = ["crown", "server", "layout", "megaphone", "search", "pen", "bot", "code",
-                      "chart", "palette", "brain", "shield"] as const;
+                      "chart", "palette", "brain", "shield", "team"] as const;
 export const COLORS = ["#f5b041", "#5aa9ff", "#c084fc", "#ff6b9a", "#3ecf8e", "#4fd1c5", "#f87171", "#a3e635"];
 
 export interface TeamAgent {
@@ -20,6 +20,7 @@ export interface TeamAgent {
   y: number;
   color: string;
   icon: string;
+  ref?: string;            // a linked agent or team (its id): it stays in step with the original
 }
 export interface TeamLink { from: string; to: string }
 export interface Team {
@@ -66,13 +67,15 @@ export interface RunState {
   web: string;
   createdAt: number;
   finishedAt: number | null;
+  names: Record<string, string>;   // every agent's name, including those inside linked teams
 }
 
 // ---- runs: events -> state ------------------------------------------------------------------
 
 export function emptyRun(id = "", task = "", teamId = ""): RunState {
   return { id, teamId, task, status: "running", agents: {}, handoffs: [], active: null, files: [],
-           preview: "", final: "", error: "", web: "", createdAt: Date.now() / 1000, finishedAt: null };
+           preview: "", final: "", error: "", web: "", createdAt: Date.now() / 1000, finishedAt: null,
+           names: {} };
 }
 
 const blankAgent = (): AgentRun =>
@@ -88,7 +91,7 @@ export function applyEvent(s: RunState, e: any): RunState {
   switch (e?.type) {
     case "run":
       return { ...s, id: e.run_id, teamId: e.team_id, task: e.task, web: e.web ?? "",
-               createdAt: e.created_at ?? s.createdAt, status: "running" };
+               createdAt: e.created_at ?? s.createdAt, status: "running", names: e.names ?? s.names };
     case "agent_status":
       return withAgent(s, e.agent, () => ({ status: e.status, detail: e.detail ?? "" }));
     case "handoff":
@@ -143,13 +146,13 @@ export function fromSaved(d: any): RunState {
     id: d.id, teamId: d.team_id, task: d.task ?? "", status: d.status ?? "done", agents,
     handoffs: d.handoffs ?? [], active: null, files: d.files ?? [], preview: d.preview ?? "",
     final: d.final ?? "", error: d.error ?? "", web: d.web ?? "",
-    createdAt: d.created_at ?? 0, finishedAt: d.finished_at ?? null,
+    createdAt: d.created_at ?? 0, finishedAt: d.finished_at ?? null, names: d.names ?? {},
   };
 }
 
 /** The line under the composer: who's doing what right now. */
 export function runHeadline(run: RunState, team: Team): string {
-  const name = (id: string) => team.agents.find((a) => a.id === id)?.name ?? "An agent";
+  const name = (id: string) => run.names[id] ?? team.agents.find((a) => a.id === id)?.name ?? "An agent";
   if (run.status === "done") return "Done";
   if (run.status === "stopped") return "Stopped";
   if (run.status === "failed") return run.error ? `Couldn't finish: ${run.error}` : "Couldn't finish";
@@ -270,3 +273,6 @@ export function elapsed(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
+
+/** Just one agent of its own (not a linked team): shown and talked about as an agent. */
+export const isSingle = (t: Team) => t.agents.length === 1 && !t.agents[0].ref;

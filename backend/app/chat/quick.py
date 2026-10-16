@@ -139,10 +139,46 @@ _MEDIA_RE = re.compile(
     r"(?:\s+(?:song|track|video))?")
 
 
+_TEAM = re.compile(
+    r"(?:(?:hey |ok |okay )?jarvis,?\s+)?(?:can you |could you |please )?"
+    r"(?:ask|tell|get|have|use|give)\s+(?:the |my |our )?(?P<name>[\w&' -]{2,40}?)\s+"
+    r"(?P<kind>team|agents?|crew)\s*(?:,|to|and|:|-)?\s+(?:to\s+)?(?P<task>.{3,})", re.S)
+
+
+_BY_NAME = re.compile(
+    r"(?:(?:hey |ok |okay )?jarvis,?\s+)?(?:can you |could you |please )?"
+    r"(?:ask|tell|get|have)\s+(?:the |my |our )?(?P<name>[\w&' -]{2,40}?)\s+to\s+(?P<task>.{3,})", re.S)
+
+
+def _team(t: str, low: str) -> QuickAction | None:
+    """'Ask the IT team to set up a new starter', 'tell my writer agent to …',
+    'use the startup team to build …' — straight to that agent or team (one the
+    user has, by name), with everything after it as the task."""
+    if len(low) > 1500:
+        return None
+    from ..teams import store
+    if m := _TEAM.fullmatch(low):
+        found = store.find(f"{m.group('name')} {m.group('kind')}")
+    elif m := _BY_NAME.fullmatch(low):
+        # "ask Writer to …": only when that's exactly the name of one of theirs.
+        found = store.find(m.group("name"))
+        if isinstance(found, dict) and store._key(found["name"]) != store._key(m.group("name")):
+            found = None
+    else:
+        return None
+    if not isinstance(found, dict):
+        return None
+    task = t[m.start("task"):].strip().rstrip(".")
+    return QuickAction("run_agent_team", {"task": task, "team": found["id"]}, "")
+
+
 def match(text: str) -> QuickAction | None:
     """Return the instant action for `text`, or None to let the model handle it."""
     t = _normalize(text)
     low = t.lower()
+    # "Ask the IT team to …" can be long and full of "and"s: it's checked first.
+    if action := _team(t, low):
+        return action
     if not low or len(low) > 120:
         return None
     # Timers, reminders, volume, time and sums may contain "and" ("an hour and a

@@ -100,7 +100,8 @@ class Run:
                 "task": self.task, "status": self.status, "final": self.final,
                 "error": self.error, "agents": self.agents, "files": self.files,
                 "preview": self.preview, "handoffs": self.handoffs, "web": self.web,
-                "created_at": self.created_at, "finished_at": self.finished_at}
+                "created_at": self.created_at, "finished_at": self.finished_at,
+                "names": {a["id"]: a["name"] for a in self.team["agents"]}}
 
 
 # ---- starting, stopping, following -----------------------------------------------------
@@ -115,6 +116,7 @@ def start(team: dict, task: str) -> Run | str:
     task = (task or "").strip()
     if not task:
         return "Tell the team what to do first."
+    team = store.expand(team)             # linked agents and teams become real ones
     if team.get("lead") not in {a["id"] for a in team.get("agents") or []}:
         return "This team has no agents yet — add one on the canvas first."
     if (busy := active()) is not None:
@@ -192,7 +194,7 @@ async def _execute(run: Run) -> None:
     global _active
     lead = run.team["lead"]
     run.emit({"type": "run", "run_id": run.id, "team_id": run.team["id"], "task": run.task,
-              "web": run.web, "created_at": run.created_at})
+              "web": run.web, "created_at": run.created_at, "names": _names(run)})
     status = "done"
     try:
         run.final = await _turn(run, lead, run.task, "", 0, (lead,), "")
@@ -210,7 +212,8 @@ async def _execute(run: Run) -> None:
     run.finished_at = time.time()
     store.finish_run(run.id, status, run.final, {
         "agents": run.agents, "files": run.files, "preview": run.preview, "error": run.error,
-        "handoffs": run.handoffs, "web": run.web, "team": run.team["name"]})
+        "handoffs": run.handoffs, "web": run.web, "team": run.team["name"],
+        "names": _names(run)})
     audit.log("team_run_finished", team=run.team["name"], status=status,
               seconds=round(run.finished_at - run.created_at))
     if status == "done":
@@ -227,6 +230,11 @@ async def _execute(run: Run) -> None:
             await callback(run)
         except Exception as e:
             audit.log("team_run_callback_error", error=str(e)[:300])
+
+
+def _names(run: Run) -> dict[str, str]:
+    """Every agent's name, including those inside linked teams ("card.agent")."""
+    return {a["id"]: a["name"] for a in run.team["agents"]}
 
 
 # ---- one agent's turn ------------------------------------------------------------------

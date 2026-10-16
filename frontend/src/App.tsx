@@ -6,6 +6,7 @@ import {
 import { AGENTS, ChatView, ConfirmModal, ConfirmRequest, ToolChipInfo } from "./components/ChatView";
 import { MatrixRain } from "./components/MatrixRain";
 import { GlyphField } from "./components/GlyphField";
+import { TalkTo } from "./components/TalkTo";
 import { WorldMap } from "./components/WorldMap";
 import { Page, Sidebar } from "./components/Sidebar";
 import { CommandPalette } from "./components/CommandPalette";
@@ -179,6 +180,18 @@ export default function App() {
     []
   );
 
+  // "Talk to": Jarvis, or one of the user's agents or teams (shared by Core and Chat).
+  const [talkTo, setTalkToState] = useState<{ id: string; name: string }>(() => {
+    try { return JSON.parse(localStorage.getItem("jarvis.talkTo") || "") ?? { id: "", name: "Jarvis" }; }
+    catch { return { id: "", name: "Jarvis" }; }
+  });
+  const talkToRef = useRef(talkTo);
+  talkToRef.current = talkTo;
+  const setTalkTo = (id: string, name: string) => {
+    setTalkToState({ id, name });
+    try { localStorage.setItem("jarvis.talkTo", JSON.stringify({ id, name })); } catch { /* private mode */ }
+  };
+
   const send = useCallback((text: string, convId?: string | null) => {
     // Expand /skill shortcuts into their saved prompt template before sending.
     const content = expandSkill(text.trim(), skillsRef.current);
@@ -199,7 +212,7 @@ export default function App() {
     // Deliberately no navigation: talking from the Core stays on the Core.
     // Spoken requests get short, speakable answers.
     const spoken = lastInputWasVoice.current === true;
-    socket.chat(target, content, modeRef.current, spoken);
+    socket.chat(target, content, modeRef.current, spoken, talkToRef.current.id);
     // If the answer takes more than a moment, say so right away ("Let me look
     // that up.") — instant commands answer before this fires.
     clearTimeout(ackTimer.current);
@@ -688,6 +701,7 @@ export default function App() {
               <div className="conv-title">
                 {activeConv?.title ?? <span className="muted">New chat</span>}
               </div>
+              <TalkTo value={talkTo.id} onChange={setTalkTo} />
               <div className="seg" role="group" aria-label="Mode">
                 <button className={mode === "chat" ? "active" : ""} aria-pressed={mode === "chat"}
                         onClick={() => switchMode("chat")}><MessageSquare /> Chat</button>
@@ -744,7 +758,7 @@ export default function App() {
                   rows={1}
                   aria-label="Message"
                   placeholder={mode === "code" ? "Describe what to build, debug or refactor…"
-                    : `Message ${settings?.assistant?.name ?? "Jarvis"}…`}
+                    : `Message ${talkTo.id ? talkTo.name : settings?.assistant?.name ?? "Jarvis"}…`}
                   value={input}
                   onChange={(e) => {
                     setInput(e.target.value);
@@ -813,6 +827,7 @@ export default function App() {
             busy={busy}
             listening={voiceState === "listening"}
             assistantName={settings?.assistant?.name ?? "Jarvis"}
+            talkTo={talkTo} onTalkTo={setTalkTo}
             onCommand={(text) => { lastInputWasVoice.current = false; send(text); }}
             onStop={() => socket.stop()}
             onOpenChat={() => (activeId ? openConversation(activeId) : setPage("chat"))}

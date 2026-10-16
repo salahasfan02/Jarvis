@@ -81,6 +81,7 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     "ring": ("facetime_call",), "dial": ("facetime_call",),
     "agent team": ("run_agent_team",), "team of agents": ("run_agent_team",),
     "agents": ("run_agent_team",),
+    "team to": ("run_agent_team",), "agent to": ("run_agent_team",),
     "screen": ("screen_look", "screen_read", "watch_screen"),
     "text him": ("draft_imessage",), "text her": ("draft_imessage",),
     "message": ("draft_imessage", "read_messages", "read_conversation_with"),

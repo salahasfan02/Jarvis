@@ -42,17 +42,18 @@ async def _report(channel, conversation_id: str | None, run) -> None:
 
 @tool(
     name="run_agent_team",
-    description="Hand a task to one of the user's agent teams (built in the Agent teams "
-                "tab, e.g. a startup team with backend, frontend, marketing and market "
-                "research agents): its lead agent works out what's needed, briefs the right "
-                "teammates and brings their work together. It runs in the background and "
-                "reports back here when done. task = everything the user said about it; "
-                "team = the team's name (optional when they have one).",
+    description="Hand a task to one of the user's own agents or agent teams (made in the "
+                "Agents tab, e.g. an IT team or a startup team, or a single agent like a "
+                "writer): a team's lead works out what's needed, briefs the right agents "
+                "and brings their work together. Use it whenever they say to use, ask or "
+                "tell one of their agents or teams. It runs in the background and reports "
+                "back here when done. task = everything the user said about it; team = the "
+                "agent's or team's name (optional when they have one).",
     parameters={
         "type": "object",
         "properties": {
             "task": {"type": "string", "description": "what the team should do, in full"},
-            "team": {"type": "string", "description": "which team (optional)"},
+            "team": {"type": "string", "description": "which agent or team (optional)"},
         },
         "required": ["task"],
     },
@@ -68,7 +69,10 @@ async def run_agent_team(task: str, team: str = "") -> str:
         return run
     run.on_done.append(functools.partial(_report, channels.current.get(),
                                          channels.conversation.get()))
-    lead = run.agent(chosen["lead"])["name"]
+    if store.is_single(chosen):
+        return (f"{chosen['name']} is on it. It works in the background — follow along in "
+                "Agents; the result will come back here when it's done.")
+    lead = run.agent(run.team["lead"])["name"]
     return (f"Handed it to {chosen['name']}: {lead} is briefing the team now. It runs in the "
-            "background — follow along in Agent teams; the result will come back here when "
+            "background — follow along in Agents; the result will come back here when "
             "it's done.")

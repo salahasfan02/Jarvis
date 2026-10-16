@@ -1106,9 +1106,10 @@ async def ws_chat(ws: WebSocket):
     await ws.accept()
     current_task: asyncio.Task | None = None
 
-    async def run(conv_id: str, content: str, spoken: bool = False):
+    async def run(conv_id: str, content: str, spoken: bool = False, target: str = ""):
         try:
-            async for event in chat_service.run_chat(conv_id, content, spoken=spoken):
+            async for event in chat_service.run_chat(conv_id, content, spoken=spoken,
+                                                     target=target):
                 await ws.send_json(event)
         except WebSocketDisconnect:
             pass
@@ -1133,7 +1134,8 @@ async def ws_chat(ws: WebSocket):
                                mode=msg.get("mode", "chat"))["id"])
                 await ws.send_json({"type": "conversation", "conversation_id": conv_id})
                 current_task = asyncio.create_task(
-                    run(conv_id, msg.get("content", ""), bool(msg.get("voice"))))
+                    run(conv_id, msg.get("content", ""), bool(msg.get("voice")),
+                        str(msg.get("target") or "")))
                 ui_bridge.track(current_task)
 
             elif mtype == "confirm":

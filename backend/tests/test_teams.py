@@ -304,7 +304,7 @@ def test_asking_jarvis_hands_it_to_the_team_and_the_answer_comes_back(llm, monke
     conv = db.create_conversation()["id"]
 
     async def main():
-        assert "no agent teams yet" in await team_tools.run_agent_team("anything")
+        assert "no agents or teams yet" in await team_tools.run_agent_team("anything")
         store.create(template="startup")
         channels.conversation.set(conv)
         said = await team_tools.run_agent_team("build a habit app called Streaky")
@@ -326,8 +326,8 @@ def test_which_team_is_meant():
     assert store.find("my startup team")["id"] == startup["id"]
     assert store.find("research and writing")["id"] == writing["id"]
     assert store.find("research")["id"] == writing["id"]
-    assert store.find("").startswith("Which team?")
-    assert store.find("marketing crew").startswith("There's no team called")
+    assert store.find("").startswith("Which one?")
+    assert store.find("marketing crew").startswith("There's no agent or team called")
 
 
 def test_the_it_team_has_a_lead_and_its_specialists():
@@ -338,3 +338,105 @@ def test_the_it_team_has_a_lead_and_its_specialists():
     assert {l["to"] for l in t["links"]} == ids - {"itlead"}
     assert all(l["from"] == "itlead" for l in t["links"])
     assert all(set(a["skills"]) <= set(store.SKILLS) and a["role"] for a in t["agents"])
+
+
+
+# ---- single agents, teams inside teams, and asking for one by name ------------------------
+
+def _clear():
+    for t in store.list_teams():
+        store.delete(t["id"])
+
+
+def test_a_single_agent_is_a_team_of_one_that_does_the_work_itself(llm):
+    _clear()
+    writer = store.create(name="Writer", template="agent")
+    assert store.is_single(writer) and writer["agents"][0]["name"] == "Writer"
+    assert writer["agents"][0]["skills"] == ["research", "files"]
+    run = _run(writer, "Write a haiku about rain")
+    assert run.status == "done" and llm.of("Writer") and not llm.of("Writer", "plan")
+    assert store.find("my writer agent")["id"] == writer["id"]
+    assert store.find(writer["id"])["id"] == writer["id"]
+
+
+def test_a_team_can_take_in_another_team_and_it_stays_linked(llm):
+    _clear()
+    writing = store.create(template="writing")
+    boss = store.save(store.create()["id"], {
+        "name": "Company", "lead": "boss",
+        "agents": [{"id": "boss", "name": "Boss", "role": "Run the company."},
+                   {"id": "w", "name": "Writers", "ref": writing["id"]}],
+        "links": [{"from": "boss", "to": "w"}]})
+    assert boss["agents"][1]["ref"] == writing["id"]
+    # An edit to the original shows up in the team that took it in.
+    store.save(writing["id"], {**writing, "description": "Now with a sharper editor."})
+    full = store.expand(store.get(boss["id"]))
+    names = {a["id"]: a["name"] for a in full["agents"]}
+    assert names == {"boss": "Boss", "w.editor": "Writers", "w.researcher": "Researcher",
+                     "w.writer": "Writer"}
+    assert {"from": "boss", "to": "w.editor"} in full["links"]
+    assert {"from": "w.editor", "to": "w.writer"} in full["links"]
+    llm.plans = {"Boss": {"requirements": "a blog post", "assignments": [
+                     {"agent": "Writers", "brief": "Write the launch blog post."}]},
+                 "Writers": {"requirements": "post", "assignments": [
+                     {"agent": "Researcher", "brief": "Find facts."},
+                     {"agent": "Writer", "brief": "Write it."}]}}
+    run = _run(store.get(boss["id"]), "Write our launch blog post")
+    assert run.status == "done"
+    assert llm.of("Researcher") and llm.of("Writer")              # the linked team did the work
+    assert run.detail()["names"]["w.writer"] == "Writer"
+
+
+def test_linked_teams_never_loop_and_a_missing_one_is_left_out():
+    _clear()
+    a, b = store.create(name="A"), store.create(name="B")
+    store.save(a["id"], {**a, "agents": a["agents"] + [{"id": "b", "name": "B card", "ref": b["id"]}],
+                         "links": [{"from": a["lead"], "to": "b"}]})
+    store.save(b["id"], {**b, "agents": b["agents"] + [{"id": "a", "name": "A card", "ref": a["id"]}],
+                         "links": [{"from": b["lead"], "to": "a"}]})
+    full = store.expand(store.get(a["id"]))
+    assert all(x["id"].count(".") <= 1 for x in full["agents"])   # B's card back to A is dropped
+    store.delete(b["id"])
+    gone = store.expand(store.get(a["id"]))
+    assert [x["id"] for x in gone["agents"]] == [a["lead"]] and gone["links"] == []
+
+
+def test_asking_for_a_team_by_name_goes_straight_to_it():
+    from app.chat import quick, service
+    _clear()
+    it = store.create(template="it")
+    action = quick.match("Ask the IT team to set up a new starter, Sam Jones, in Finance on "
+                         "Monday and order a laptop")
+    assert action.tool == "run_agent_team" and action.arguments["team"] == it["id"]
+    assert action.arguments["task"].startswith("set up a new starter, Sam Jones")
+    assert quick.match("use my it team to write a password policy").arguments["team"] == it["id"]
+    assert quick.match("ask my mum to call me") is None             # not one of their teams
+    writer = store.create(name="Writer", template="agent")
+    assert quick.match("ask Writer to draft a welcome email").arguments == {
+        "task": "draft a welcome email", "team": writer["id"]}
+    assert quick.match("ask the writers group to meet") is None
+    assert service._asked_for_team("ask the IT team to fix the wifi", it["id"])
+    assert not service._asked_for_team("fix the wifi", it["id"])
+    token = service._picked.set(it["id"])
+    assert service._asked_for_team("fix the wifi", it["id"])        # picked in the app
+    service._picked.reset(token)
+
+
+def test_a_message_sent_to_a_picked_agent_goes_straight_to_it(llm):
+    from app.chat import service
+    _clear()
+    writer = store.create(name="Writer", template="agent")
+    conv = db.create_conversation()["id"]
+
+    async def main():
+        events = [e async for e in service.run_chat(conv, "Write a haiku about rain",
+                                                    target=writer["id"])]
+        run = engine.active()
+        await run.task_handle
+        return events, run
+    events, run = asyncio.run(main())
+    assert not any(e["type"] == "confirm_request" for e in events)     # picked = no "shall I?"
+    assert any(e["type"] == "tool_start" and e["name"] == "run_agent_team" for e in events)
+    assert run.team["id"] == writer["id"] and run.task == "Write a haiku about rain"
+    done = next(e for e in events if e["type"] == "done")
+    assert done["content"].startswith("Writer is on it.")
