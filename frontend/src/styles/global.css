@@ -1176,6 +1176,15 @@ input[type="range"] { accent-color: var(--accent); }
 .tp-menu-wrap { position: relative; }
 .tp-list-title { font-size: 13px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; margin: 22px 0 10px; }
 .tp-template.current { border-color: var(--accent-line); }
+.tp-card { position: relative; display: flex; }
+.tp-card > .tp-template { flex: 1; }
+.tp-card-delete {
+  position: absolute; top: 12px; right: 12px; opacity: 0; transition: opacity var(--fast);
+  display: inline-flex; align-items: center; gap: 5px; width: auto; padding: 0 8px; font-size: 12px;
+}
+.tp-card:hover .tp-card-delete, .tp-card-delete:focus-visible, .tp-card-delete.armed { opacity: 1; }
+.tp-card-delete:hover, .tp-card-delete.armed { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+@media (hover: none) { .tp-card-delete { opacity: .8; } }
 .tp-kind { font-size: 11px; font-weight: 500; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
 .tp-menu-item.muted { opacity: .6; }
 .tp-menu-item .tp-agent-icon { flex-shrink: 0; }

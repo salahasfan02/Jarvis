@@ -40,7 +40,7 @@ export function TeamsPage() {
   const [task, setTask] = useState("");
   const [models, setModels] = useState<{ names: string[]; active: string }>({ names: [], active: "" });
   const [menu, setMenu] = useState<"" | "new" | "history" | "import">("");
-  const [armDelete, setArmDelete] = useState(false);
+  const [armDelete, setArmDelete] = useState("");      // the one waiting for a second click
   const [, tick] = useState(0);
 
   // ---- loading ----
@@ -197,19 +197,24 @@ export function TeamsPage() {
       toast("Couldn't create the team", "error");
     }
   };
-  const deleteTeam = async () => {
-    if (!team) return;
-    if (!armDelete) {
-      setArmDelete(true);
-      setTimeout(() => setArmDelete(false), 3000);
+  // Deleting is done from the list of agents and teams: click the bin, then again to confirm.
+  const deleteTeam = async (victim: Team) => {
+    if (armDelete !== victim.id) {
+      setArmDelete(victim.id);
+      setTimeout(() => setArmDelete((id) => (id === victim.id ? "" : id)), 3000);
       return;
     }
-    setArmDelete(false);
-    await teamsApi.remove(team.id).catch(() => {});
-    const rest = (teams ?? []).filter((t) => t.id !== team.id);
+    setArmDelete("");
+    try {
+      await teamsApi.remove(victim.id);
+    } catch (e: any) {
+      toast(e.message || "Couldn't delete it", "error");
+      return;
+    }
+    const rest = (teams ?? []).filter((t) => t.id !== victim.id);
     setTeams(rest);
-    setTeamId(rest[0]?.id ?? "");
-    toast(isSingle(team) ? "Agent deleted" : "Team deleted");
+    if (victim.id === teamId) setTeamId(rest[0]?.id ?? "");
+    toast(`${victim.name} deleted`);
   };
 
   // ---- agents and links ----
@@ -324,7 +329,8 @@ export function TeamsPage() {
               <h3 className="tp-list-title">Your agents &amp; teams</h3>
               <div className="tp-templates">
                 {teams.map((t) => (
-                  <button key={t.id} className={`tp-template ${t.id === teamId ? "current" : ""}`}
+                  <div key={t.id} className="tp-card">
+                  <button className={`tp-template ${t.id === teamId ? "current" : ""}`}
                           onClick={() => { setTeamId(t.id); setBrowsing(false); }}>
                     {(() => {
                       const Icon = isSingle(t) ? AGENT_ICONS[t.agents[0].icon] ?? Bot : Workflow;
@@ -339,6 +345,13 @@ export function TeamsPage() {
                     </span>
                     {t.updated_at ? <span className="muted tp-updated">Edited {timeAgo(t.updated_at)}</span> : null}
                   </button>
+                  <button className={`icon-btn tp-card-delete ${armDelete === t.id ? "armed" : ""}`}
+                          title={armDelete === t.id ? "Click again to delete it" : `Delete ${t.name}`}
+                          aria-label={armDelete === t.id ? `Confirm deleting ${t.name}` : `Delete ${t.name}`}
+                          onClick={() => deleteTeam(t)}>
+                    <Trash2 />{armDelete === t.id && <span>Delete?</span>}
+                  </button>
+                  </div>
                 ))}
               </div>
               <h3 className="tp-list-title">Make a new one</h3>
@@ -481,9 +494,6 @@ export function TeamsPage() {
             </div>
           )}
         </div>
-        <button className="icon-btn" title={armDelete ? "Click again to delete it" : `Delete ${isSingle(team) ? "agent" : "team"}`}
-                aria-label={armDelete ? "Confirm delete" : `Delete ${isSingle(team) ? "agent" : "team"}`}
-                style={armDelete ? { color: "var(--danger)" } : undefined} onClick={deleteTeam}><Trash2 /></button>
       </div>
 
       <div className="tp-body">
