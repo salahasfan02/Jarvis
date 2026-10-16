@@ -1167,6 +1167,9 @@ input[type="range"] { accent-color: var(--accent); }
 }
 .tp-team-select:hover, .tp-team-select:focus-visible { background-color: var(--surface-2); }
 .tp-menu-wrap { position: relative; }
+.tp-list-title { font-size: 13px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; margin: 22px 0 10px; }
+.tp-template.current { border-color: var(--accent-line); }
+.tp-updated { font-size: 12px; margin-top: auto; }
 .tp-save { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
 .tp-save .lucide { width: 13px; height: 13px; }
 .tp-save.saved .lucide { color: var(--ok); }

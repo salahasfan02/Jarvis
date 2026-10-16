@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowUp, Bot, Check, ChevronDown, Crown, ExternalLink, FileCode, History, Plus, Save, Square, Trash2,
+  ArrowLeft, ArrowUp, Bot, Check, ChevronDown, Crown, ExternalLink, FileCode, History, Plus, Save, Square, Trash2,
   Workflow, X,
 } from "lucide-react";
 import { api, ORIGIN } from "../lib/api";
@@ -30,6 +30,7 @@ export function TeamsPage() {
   const [teams, setTeams] = useState<Team[] | null>(null);
   const [templates, setTemplates] = useState<TeamTemplate[]>([]);
   const [teamId, setTeamId] = useState<string>(() => localStorage.getItem("jarvis.team") ?? "");
+  const [browsing, setBrowsing] = useState(false);       // the list of teams instead of one team
   const [team, setTeam] = useState<Team | null>(null);
   const [selected, setSelected] = useState<Selection>(null);
   const [tab, setTab] = useState<"inspect" | "results">("inspect");
@@ -189,6 +190,7 @@ export function TeamsPage() {
       const t = await teamsApi.create(template);
       setTeams((list) => [t, ...(list ?? [])]);
       setTeamId(t.id);
+      setBrowsing(false);
       toast(`Created ${t.name}`);
     } catch {
       toast("Couldn't create the team", "error");
@@ -282,8 +284,8 @@ export function TeamsPage() {
     return (id: string) => names.get(id) ?? id;
   }, [team?.agents]);
 
-  // ---- no teams yet ----
-  if (teams !== null && teams.length === 0) {
+  // ---- all teams (and a new one from a template) ----
+  if (teams !== null && (teams.length === 0 || browsing)) {
     return (
       <div className="page">
         <div className="page-inner wide">
@@ -291,6 +293,27 @@ export function TeamsPage() {
             Build a team of AI agents on a canvas: say what each one does and connect them. You talk
             to one agent — it works out what's needed, briefs the others and brings their work together.
           </PageHeader>
+          {teams.length > 0 && (
+            <>
+              <h3 className="tp-list-title">Your teams</h3>
+              <div className="tp-templates">
+                {teams.map((t) => (
+                  <button key={t.id} className={`tp-template ${t.id === teamId ? "current" : ""}`}
+                          onClick={() => { setTeamId(t.id); setBrowsing(false); }}>
+                    <span className="tile-icon"><Workflow /></span>
+                    <h4>{t.name}</h4>
+                    <p>{t.description || `${t.agents.length} agent${t.agents.length === 1 ? "" : "s"}`}</p>
+                    <span className="tp-template-agents">
+                      {t.agents.slice(0, 5).map((a) => <span key={a.id} className="chip">{a.name}</span>)}
+                      {t.agents.length > 5 && <span className="chip">+{t.agents.length - 5}</span>}
+                    </span>
+                    {t.updated_at ? <span className="muted tp-updated">Edited {timeAgo(t.updated_at)}</span> : null}
+                  </button>
+                ))}
+              </div>
+              <h3 className="tp-list-title">Start a new team</h3>
+            </>
+          )}
           <div className="tp-templates">
             {templates.map((t) => (
               <button key={t.id} className="tp-template" onClick={() => createTeam(t.id)}>
@@ -322,6 +345,9 @@ export function TeamsPage() {
   return (
     <div className="teams-page">
       <div className="tp-head">
+        <button className="btn sm ghost" title="All teams" aria-label="Back to all teams"
+                onClick={async () => { await flushSave(); setSelected(null); setBrowsing(true); }}>
+          <ArrowLeft /> All teams</button>
         <span className="tile-icon"><Workflow /></span>
         <div className="tp-team">
           <select className="tp-team-select" value={team.id} aria-label="Team"

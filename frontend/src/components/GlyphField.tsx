@@ -8,7 +8,9 @@ interface Ripple { x: number; y: number; born: number; strength: number }
 
 /** A quiet field of characters with brighter shapes drifting through it. Press
  *  anywhere and a ripple runs out from that spot, lighting and scrambling the
- *  characters it passes; dragging leaves a trail. Tinted by the theme. */
+ *  characters it passes; dragging leaves a trail. Left alone it still moves: a
+ *  wave of lit characters sweeps across now and then, and gentle ripples rise
+ *  on their own. Tinted by the theme. */
 export function GlyphField() {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -18,7 +20,7 @@ export function GlyphField() {
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let cols = 0, rows = 0, chars: string[] = [], weight: number[] = [], raf = 0, last = 0;
     let ripples: Ripple[] = [];
-    let dragging = false, lastDrop = 0;
+    let dragging = false, lastDrop = 0, nextAuto = performance.now() + 1200;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     const resize = () => {
@@ -53,6 +55,10 @@ export function GlyphField() {
       ctx.textBaseline = "top";
 
       ripples = ripples.filter((r) => now - r.born < 2600);
+      const w = window.innerWidth, h = window.innerHeight;
+      // The sweep: a soft diagonal band crossing the screen every ~9 s.
+      const span = w + h + 600;
+      const sweep = ((now / 1000) * 150) % span - 300;
       for (let cy = 0; cy < rows; cy++) {
         for (let cx = 0; cx < cols; cx++) {
           const px = cx * CELL, py = cy * CELL;
@@ -65,6 +71,10 @@ export function GlyphField() {
             const d = Math.hypot(px - r.x, py - r.y);
             const band = Math.exp(-((d - front) ** 2) / 3200) * Math.max(0, 1 - age / 2.6) ** 1.5;
             lit += band * r.strength;
+          }
+          if (!still) {
+            const along = px * 0.8 + py * 0.6;               // distance along the sweep's direction
+            lit += Math.exp(-((along - sweep) ** 2) / 5000) * 0.45;
           }
           a += lit * 0.7 * (0.4 + weight[i]);
           // Characters flicker now and then, and scramble where a ripple passes.
@@ -82,6 +92,11 @@ export function GlyphField() {
       raf = requestAnimationFrame(loop);
       if (now - last < 1000 / FPS) return;
       last = now;
+      if (now > nextAuto) {                                 // a ripple of its own
+        ripples.push({ x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight,
+                       born: now, strength: 0.5 });
+        nextAuto = now + 2500 + Math.random() * 2500;
+      }
       draw(now);
     };
 
