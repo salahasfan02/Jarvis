@@ -37,7 +37,7 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 - **🌐 It knows what's going on** — researches the web, reads the best pages and answers with **numbered sources**; live weather without an API key.
 - **🦾 It does things** — opens apps, controls your browser, plays anything on **Apple Music**, switches your **smart lights**, makes **FaceTime calls**, takes **photos**, drafts emails, manages files, runs code — with a permission prompt before anything touches your system.
 - **📱 It's in your pocket** — message it on Telegram, and *"send that to me"* puts any answer, chat or document on your phone.
-- **🧩 It's an OS, not a chatbot** — a living command-center dashboard with agents, **agent teams you wire together on a canvas**, projects, long-term memory, and a plugin system it can extend *itself*.
+- **🧩 It's an OS, not a chatbot** — a living command-center dashboard with agents, **agents and teams of agents you build on a canvas and talk to by name**, projects, long-term memory, and a plugin system it can extend *itself*.
 - **🆓 Free & source-available** — free for any **noncommercial** use. Fork it, hack it, make it yours.
 
 ---
@@ -51,6 +51,20 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 
 **Research with sources** — Jarvis searches the web, reads the best pages and cites every claim
 ![Chat](docs/screenshots/chat.png)
+
+**Agents** — make an agent for a job, or a team of agents on a canvas, and bring agents and teams into bigger teams
+![Agents](docs/screenshots/agents.png)
+
+</div>
+
+| A team with a whole IT team and a Writer linked in | A single agent's finished job, with the file it saved |
+|:---:|:---:|
+| ![Team with linked cards](docs/screenshots/team-linked.png) | ![Agent results](docs/screenshots/agent-results.png) |
+
+<div align="center">
+
+**Talk to** — choose who your message goes to: Jarvis, or any of your agents and teams (shown over the new glyph-field background)
+![Talk to](docs/screenshots/talk-to.png)
 
 </div>
 
@@ -135,7 +149,9 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 
 ### 🤖 Intelligence
 - **Auto-routing agents** (research, coding, media, vision…)
-- **Agent teams** — build a team of AI agents on a canvas: say what each one does, give it skills (web research, making files) and connect them. You talk to one — say, a *main agent* — and it works out what's needed, writes a detailed brief for each agent it's connected to (*backend*, *frontend*, *marketing*, *market research*…), and brings their work together. Web pages they make go live straight away. Or just say *"ask my startup team to…"*
+- **Agents & teams** — make a single **agent** for a job (say what it does; let it research the web and make files), or a **team** on a canvas: connect agents and the one you talk to works out what's needed, briefs each agent it's connected to (*backend*, *frontend*, *marketing*, *market research*…) and brings their work together. Web pages they make go live straight away. Ready-made **Startup**, **Research & writing** and **IT** teams (an IT lead with helpdesk, Microsoft 365, network, servers, security, scripting, software, SQL, assets and documentation specialists)
+- **Teams inside teams** — **Import** any of your agents or teams into another team as a linked card: it stays in step with the original, and its own lead runs it when the bigger team hands it work
+- **Talk to any of them** — pick an agent or team under **Talk to** on the Core or in Chat, or just say *"ask the IT team to set up a new starter on Monday"* / *"ask Writer to draft a welcome email"*; it works in the background and the answer comes back into the chat
 - **Multi-step task planner** with a live checklist
 - **Custom Skills** — save prompts, invoke with `/name`, import/export
 - **Self-improving** — logs what it can't do and can write its own tools
@@ -149,6 +165,9 @@ Every AI assistant wants your data in the cloud. Jarvis doesn't.
 </td>
 </tr>
 </table>
+
+### 🎨 Make it yours
+Themes (hacker green, dark blue, cyberpunk, light), four Core designs, your own accent colour or picture — and a **glyph field** background: a quiet field of characters with waves of light drifting through it, rippling out from wherever you click.
 
 ### 🖥️ Menu-bar Quick Command
 Hit **⌥Space** from *any* app to summon a floating command bar — ask about what's on your screen, get an answer, and get back to work without switching windows. Inside Jarvis, **⌘K** jumps to any page, chat or action — or just asks.
@@ -380,7 +399,7 @@ Jarvis is built to earn your trust:
 - **Nothing is sent behind your back** — iMessages are only drafted; an email goes out only when you say *send* and approve that exact message (this approval can't be switched off).
 - **Websites can't drive it** — the local API only accepts changes and chat connections from Jarvis's own UI, so a page you visit can't talk to Jarvis behind your back.
 - **Sandboxed code** — generated code runs with no network, can't read your keys, mail or messages, can't script other apps, and can only write to its own folder.
-- **Agent teams stay in their lane** — team agents can only research the web and write files into their run's own workspace; the pages they publish are sandboxed too, so nothing they make can reach Jarvis or the rest of your Mac.
+- **Agents and teams stay in their lane** — they can only research the web and write files into their run's own workspace; the pages they publish are sandboxed too, so nothing they make can reach Jarvis or the rest of your Mac.
 - **Calls show you who first** — before Jarvis rings anyone you see the person and the exact number it found; calls never start from the phone or a routine, when you're not at the Mac to talk.
 
 ---

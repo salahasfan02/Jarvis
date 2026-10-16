@@ -440,3 +440,15 @@ def test_a_message_sent_to_a_picked_agent_goes_straight_to_it(llm):
     assert run.team["id"] == writer["id"] and run.task == "Write a haiku about rain"
     done = next(e for e in events if e["type"] == "done")
     assert done["content"].startswith("Writer is on it.")
+
+
+def test_a_call_typed_into_the_answer_is_made_real_and_never_shown(llm, tmp_path):
+    _clear()
+    writer = store.create(name="Writer", template="agent")
+    llm.work = {"Writer": lambda msgs: (
+        'Welcome to the team!\n\n```python\nsave_file("welcome.md", "Welcome to IT (we\'re glad)")\n```'
+        if not any(m["role"] == "tool" for m in msgs) else "Saved welcome.md for you.")}
+    run = _run(writer, "Write a welcome note and save it")
+    assert run.status == "done" and [f["path"] for f in run.files] == ["welcome.md"]
+    assert (run.workspace / "welcome.md").read_text() == "Welcome to IT (we're glad)"
+    assert "save_file" not in run.final and run.final.startswith("Welcome to the team!")

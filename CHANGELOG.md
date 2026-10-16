@@ -4,6 +4,39 @@ Newest first. The short hashes in brackets show which commit made each change.
 
 ---
 
+# October 2026 — agents, teams inside teams, Talk to and a glyph field
+
+## Agents [8d741f0, 58634e6, aac550b, 84e5f5d, a0cf948]
+
+- The **Agent teams** tab is now **Agents**. Make a single agent for one job,
+  or a team on a canvas; the list shows both, and **All agents** goes back to it.
+- **Import** any of your agents or teams into a team as a linked card. It stays
+  in step with the original; when a run starts it unfolds into its real agents
+  (its lead takes the card's name), never loops, and a card whose original was
+  deleted is left out. The card lights up while the agents inside it work.
+- **Talk to** on the Core and in Chat: pick Jarvis or any agent or team, and
+  what you type or say goes straight to it; the answer comes back into the chat.
+- By voice or text, *"ask the IT team to …"*, *"use my writer agent to …"* or
+  *"ask Writer to …"* go straight to it without a "shall I?" — you named it.
+- A ready-made **IT team**: an IT lead and ten specialists (helpdesk, Microsoft
+  365 and identity, network, servers and cloud, security and compliance,
+  scripting, software developer, SQL, assets and licences, documentation).
+- Teams save with a visible status (**Unsaved changes → Saving… → Saved**), a
+  **Save** button and ⌘S; rename a team from its top bar; the New and Runs
+  menus open on top of the side panel.
+- When an agent typed a tool call into its answer (`save_file("…", "…")`),
+  it's taken out of the answer and made for real; each step's words start a
+  new paragraph.
+
+## Glyph field background [a0cf948, 84e5f5d, aac550b]
+
+- Settings → Appearance → Background → **Glyph field**: faint characters with
+  brighter clouds drifting through them, a wave of light sweeping across every
+  few seconds, and a ripple from wherever you click. Holds still with Reduce
+  motion.
+
+---
+
 # October 2026 — FaceTime, photos and agent teams
 
 ## FaceTime calls

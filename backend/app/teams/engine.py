@@ -438,6 +438,53 @@ def _trim(messages: list[dict]) -> None:
             m["content"] = m["content"][:400] + " …(older result cut short)"
 
 
+def _written_calls(text: str, kit: dict) -> tuple[str, list[dict]]:
+    """A local model sometimes types a call into its answer as code —
+    `save_file("welcome.md", "Welcome to …")` — instead of making it. Take
+    those out of the text (the user shouldn't read them) and return them as
+    real calls, positional values matched to the tool's parameters."""
+    import ast
+    calls, out, i = [], [], 0
+    pattern = re.compile(r"\b(" + "|".join(map(re.escape, kit)) + r")\(") if kit else None
+    while pattern and (m := pattern.search(text, i)):
+        depth, j, quote = 0, m.end() - 1, ""
+        while j < len(text):                       # the matching ")" outside of strings
+            ch = text[j]
+            if quote:
+                if ch == "\\":
+                    j += 1
+                elif ch == quote:
+                    quote = ""
+            elif ch in "\"'":
+                quote = ch
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        if depth:
+            break
+        try:
+            node = ast.parse(text[m.start():j + 1], mode="eval").body
+            params = list((kit[m.group(1)].to_ollama()["function"].get("parameters") or {})
+                          .get("properties", {}))
+            args = {params[k]: ast.literal_eval(a) for k, a in enumerate(node.args) if k < len(params)}
+            args.update({kw.arg: ast.literal_eval(kw.value) for kw in node.keywords if kw.arg})
+        except (SyntaxError, ValueError, TypeError, IndexError, KeyError):
+            i = m.end()
+            continue
+        calls.append({"function": {"name": m.group(1), "arguments": args}})
+        out.append(text[i:m.start()] + "\n\n")       # what was around it stays apart
+        i = j + 1
+    if not calls:
+        return text, []
+    out.append(text[i:])
+    clean = re.sub(r"```[a-z]*\s*```", "", "".join(out))       # fences left empty
+    return re.sub(r"\n{3,}", "\n\n", clean).strip(), calls
+
+
 async def _work(run: Run, agent: dict, brief: str, sender: str, earlier: str) -> str:
     kit = {t.name: t for t in _kit(run, agent)}
     schemas = [t.to_ollama() for t in kit.values()] or None
@@ -456,7 +503,16 @@ async def _work(run: Run, agent: dict, brief: str, sender: str, earlier: str) ->
             # It wrote the tool call out as text: make it a real one.
             calls, text = [recovered], ""
             run.emit({"type": "agent_reset", "agent": agent["id"], "content": written})
-        written += text
+        clean, typed = _written_calls(text, kit)
+        if typed:
+            # save_file("x.md", "…") typed into the answer: never shown; made real
+            # unless it also made the call properly.
+            text = clean
+            if not calls and use:
+                calls = typed
+            run.emit({"type": "agent_reset", "agent": agent["id"], "content": written + text})
+        # Each round's words start a new paragraph ("…the IT Department" then "I've saved…").
+        written = f"{written.rstrip()}\n\n{text.lstrip()}" if written.strip() and text.strip() else written + text
         if not calls:
             break
         messages.append({"role": "assistant", "content": text, "tool_calls": calls})

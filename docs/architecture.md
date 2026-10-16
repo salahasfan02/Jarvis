@@ -306,3 +306,24 @@ _turn(agent, brief):
   (move/resize/click) beyond AppleScript.
 - Meeting transcription: reuse the STT endpoint with speaker diarization,
   store transcripts as conversations tagged `folder="meetings"`.
+
+## Agents, linked teams and Talk to (v5)
+
+A single agent is a team of one (`store.is_single`). A team can hold another of
+the user's agents or teams as a **linked card**: an agent with `ref` = that
+team's id. The card stays linked — `store.expand()` unfolds it when a run
+starts: its agents get ids under the card's (`card.agent`), its lead takes the
+card's name (that's the name the parent's planner sees), links to the card go
+to that lead, a loop back up the chain or a deleted original is dropped, and
+nesting stops at three levels. Runs send every agent's name (`names`), so the
+canvas and results can show agents that only exist inside a linked card.
+
+**Talk to** sends `target` (an agent's or team's id) with a chat message;
+`run_chat` hands the message straight to `run_agent_team` without asking.
+By voice or text, `quick._team` catches *"ask/tell/use the X team|agent to …"*
+— and *"ask X to …"* when X is exactly one of theirs — and `_asked_for_team`
+lets it run without a "shall I?", because the user named it.
+
+Local models sometimes type a call into their answer (`save_file("a.md", "…")`)
+instead of making it; `engine._written_calls` takes it out of the text and makes
+it for real.
