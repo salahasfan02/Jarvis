@@ -261,7 +261,7 @@ def test_teams_api_and_a_live_run(llm):
     api.include_router(router)
     # One event loop for every request (a run carries on between them, as in the app).
     with TestClient(api, base_url="http://127.0.0.1:8765") as client:
-        assert {t["id"] for t in client.get("/api/teams/templates").json()} == {"startup", "writing"}
+        assert {t["id"] for t in client.get("/api/teams/templates").json()} == {"startup", "writing", "it"}
         team = client.post("/api/teams", json={"template": "startup"}).json()
         team["agents"][1]["role"] = "Research the market, citing sources."
         saved = client.put(f"/api/teams/{team['id']}", json=team).json()
@@ -328,3 +328,13 @@ def test_which_team_is_meant():
     assert store.find("research")["id"] == writing["id"]
     assert store.find("").startswith("Which team?")
     assert store.find("marketing crew").startswith("There's no team called")
+
+
+def test_the_it_team_has_a_lead_and_its_specialists():
+    from app.teams import store
+    t = store.TEMPLATES["it"]
+    ids = {a["id"] for a in t["agents"]}
+    assert t["lead"] == "itlead" and len(ids) == 11
+    assert {l["to"] for l in t["links"]} == ids - {"itlead"}
+    assert all(l["from"] == "itlead" for l in t["links"])
+    assert all(set(a["skills"]) <= set(store.SKILLS) and a["role"] for a in t["agents"])

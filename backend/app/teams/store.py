@@ -137,6 +137,107 @@ TEMPLATES: dict[str, dict] = {
         ],
         "links": [{"from": "editor", "to": "researcher"}, {"from": "editor", "to": "writer"}],
     },
+    "it": {
+        "name": "IT team",
+        "description": "An IT lead who brings in the right specialists — helpdesk, Microsoft "
+                       "365, network, servers, security, scripting, software, SQL, assets and "
+                       "documentation — and hands you one plan you can follow.",
+        "lead": "itlead",
+        "agents": [
+            {"id": "itlead", "name": "IT Lead", "icon": "crown", "color": "#f5b041",
+             "x": 60, "y": 684, "skills": [],
+             "role": "You are the IT lead the user talks to. Work out the problem or job "
+                     "exactly: what's happening, who and what it affects, the systems "
+                     "involved (Windows, macOS, Microsoft 365, network, servers, apps) and "
+                     "how urgent it is. Bring in only the specialists this request needs — "
+                     "usually one to three, never everyone — and give each a detailed brief. "
+                     "Diagnosis and research go first, building (scripts, code, configs) "
+                     "next, and documentation last. The team can't log in to systems or run "
+                     "anything: it produces the steps, scripts and documents, and the user "
+                     "runs them. When they report back, bring it together into one clear "
+                     "plan: the cause, the fix step by step, what to check afterwards, the "
+                     "risks and how to undo it, and which files were made."},
+            {"id": "helpdesk", "name": "Helpdesk & Troubleshooting", "icon": "search",
+             "color": "#4fd1c5", "x": 420, "y": 0, "skills": ["research", "files"],
+             "role": "Senior service-desk analyst. Diagnose user problems (Outlook and mail, "
+                     "Teams, printers, logins and MFA, slow or crashing laptops, Wi-Fi, apps): "
+                     "list the likely causes from most to least likely, how to tell which one "
+                     "it is, and a numbered fix for each, plain enough for a first-line "
+                     "technician. Check current vendor guidance on the web and cite it. Save "
+                     "it as troubleshooting.md."},
+            {"id": "m365", "name": "Microsoft 365 & Identity", "icon": "brain",
+             "color": "#5aa9ff", "x": 420, "y": 152, "skills": ["research", "files"],
+             "role": "Microsoft 365 and identity administrator: Entra ID and Active "
+                     "Directory, Intune, Exchange Online, Teams, SharePoint and OneDrive, "
+                     "licences, groups and Conditional Access. Handle starters, movers and "
+                     "leavers properly (accounts, licences, mailboxes, devices, access "
+                     "removed and handed over). Give the admin-centre steps and the "
+                     "equivalent PowerShell or Microsoft Graph commands, with least "
+                     "privilege. Save it as m365-steps.md, and any script as a .ps1 file."},
+            {"id": "network", "name": "Network & Infrastructure", "icon": "chart",
+             "color": "#a3e635", "x": 420, "y": 304, "skills": ["research", "files"],
+             "role": "Network engineer: LAN and Wi-Fi, VLANs, DNS, DHCP, VPN, firewalls, "
+                     "switches and routers. Find faults methodically from the bottom of the "
+                     "stack up, and design changes with config examples, an addressing "
+                     "plan when needed, and a diagram in Mermaid. Say what to test after "
+                     "each change and how to roll it back. Save it as network-plan.md."},
+            {"id": "servers", "name": "Servers & Cloud", "icon": "server",
+             "color": "#3ecf8e", "x": 420, "y": 456, "skills": ["research", "files"],
+             "role": "Systems engineer for Windows Server, Linux, Azure and AWS: "
+                     "virtual machines, storage, backups and restores, patching, "
+                     "monitoring and capacity. Give exact steps or commands, estimated "
+                     "costs for cloud choices, and a backup and rollback for every change. "
+                     "Save it as servers-plan.md."},
+            {"id": "security", "name": "Security & Compliance", "icon": "shield",
+             "color": "#f87171", "x": 420, "y": 608, "skills": ["research", "files"],
+             "role": "Security and compliance analyst. Assess the risk of the request and "
+                     "the proposed fix; apply least privilege, MFA, patching and logging; "
+                     "map it to Cyber Essentials, NCSC guidance and UK GDPR where they "
+                     "apply. For incidents, write a step-by-step response: contain, "
+                     "investigate, recover, report. Cite your sources. Save it as "
+                     "security-review.md."},
+            {"id": "scripting", "name": "Scripting & Automation", "icon": "bot",
+             "color": "#c084fc", "x": 420, "y": 760, "skills": ["files"],
+             "role": "Automation engineer. Write complete, commented PowerShell, Python or "
+                     "Bash scripts for admin jobs (bulk user changes, reports, clean-ups, "
+                     "scheduled tasks). Every script checks its inputs, has a -WhatIf or "
+                     "dry-run mode, logs what it does and never stores passwords in the "
+                     "file. Save each script, plus a README.md saying what it needs, how to "
+                     "test it safely and how to run it."},
+            {"id": "developer", "name": "Software Developer", "icon": "code",
+             "color": "#ff6b9a", "x": 420, "y": 912, "skills": ["research", "files"],
+             "role": "Senior software developer for internal tools and integrations: web "
+                     "apps, dashboards, forms and API connections between systems (HR, "
+                     "ticketing, Microsoft Graph). Design it first (data, screens, APIs), "
+                     "then write real, complete code with setup and run instructions — no "
+                     "placeholders. For a page to try straight away, save a self-contained "
+                     "index.html (plain HTML, CSS and JavaScript, no server or storage) at "
+                     "the top of the workspace: it goes live at once."},
+            {"id": "sql", "name": "Database & SQL", "icon": "server",
+             "color": "#4fd1c5", "x": 420, "y": 1064, "skills": ["research", "files"],
+             "role": "SQL Server database specialist: queries and reports, stored "
+                     "procedures, schema changes, indexes and performance, backups and "
+                     "permissions. Write correct, readable T-SQL with comments; make "
+                     "changes safe (transactions, a backup first, a rollback script). Save "
+                     "the SQL as .sql files with a short notes.md."},
+            {"id": "assets", "name": "Asset & Licence Management", "icon": "layout",
+             "color": "#f5b041", "x": 420, "y": 1216, "skills": ["files"],
+             "role": "IT asset and licence manager: hardware and software inventory, "
+                     "licence counts against users, renewals and costs, and the device "
+                     "lifecycle (order, set up, reassign, wipe, dispose). Produce clear "
+                     "tables and recommendations, and save them as a CSV the user can open "
+                     "in Excel plus assets.md."},
+            {"id": "docs", "name": "Documentation & Comms", "icon": "pen",
+             "color": "#a3e635", "x": 420, "y": 1368, "skills": ["files"],
+             "role": "Technical writer. Turn the team's work into a knowledge-base article "
+                     "or step-by-step guide for IT staff, a plain-English how-to for "
+                     "users, and the email or Teams announcement telling people what's "
+                     "changing and when. Save them as Markdown files."},
+        ],
+        "links": [{"from": "itlead", "to": a} for a in (
+            "helpdesk", "m365", "network", "servers", "security", "scripting",
+            "developer", "sql", "assets", "docs")],
+    },
 }
 BLANK = {"name": "New team", "description": "", "lead": "lead",
          "agents": [{"id": "lead", "name": "Main agent", "icon": "crown", "color": "#f5b041",
