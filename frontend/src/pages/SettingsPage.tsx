@@ -908,21 +908,22 @@ export function SettingsPage(props: {
               )}
             </div>
           </Row>
-          <Row label="Background" sub="Theme default, Matrix rain, world map, your own picture, or a custom color">
+          <Row label="Background" sub="Theme default, glyph field, Matrix rain, world map, your own picture, or a custom color">
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <select
                 value={s.ui.background?.startsWith("image:") || choosingPicture ? "picture"
-                       : ["matrix", "world"].includes(s.ui.background) ? s.ui.background
+                       : ["matrix", "world", "glyphs"].includes(s.ui.background) ? s.ui.background
                        : s.ui.background ? "custom" : "default"}
                 onChange={(e) => {
                   const v = e.target.value;
                   setChoosingPicture(v === "picture");
                   if (v === "picture") return;  // pick or upload one below
                   props.onPatch({ ui: { background:
-                    v === "matrix" || v === "world" ? v
+                    v === "matrix" || v === "world" || v === "glyphs" ? v
                     : v === "custom" ? "#010804" : "" } });
                 }}>
                 <option value="default">Theme default</option>
+                <option value="glyphs">Glyph field (ripples when you click)</option>
                 <option value="matrix">Matrix rain</option>
                 <option value="world">World map (data streams)</option>
                 <option value="picture">Picture</option>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowUp, Bot, ChevronDown, Crown, ExternalLink, FileCode, History, Plus, Square, Trash2, Workflow, X,
+  ArrowUp, Bot, Check, ChevronDown, Crown, ExternalLink, FileCode, History, Plus, Save, Square, Trash2,
+  Workflow, X,
 } from "lucide-react";
 import { api, ORIGIN } from "../lib/api";
 import { EmptyState, PageHeader, toast } from "../components/ui";
@@ -116,14 +117,22 @@ export function TeamsPage() {
   // Edits show at once and are saved a moment later (the canvas never waits).
   // What's on screen stays as typed: the server tidies its own copy (trimmed,
   // names made unique), and pulling that back mid-sentence would eat spaces.
+  // The header shows where that's at, and Save (or ⌘S) saves right now.
   const saveTimer = useRef<any>(null);
   const pending = useRef<Team | null>(null);
+  const [saveState, setSaveState] = useState<"saved" | "unsaved" | "saving" | "failed">("saved");
   const save = useCallback(async (next: Team) => {
     pending.current = null;
+    setSaveState("saving");
     try {
       await teamsApi.save(next);
+      setSaveState(pending.current ? "unsaved" : "saved");
+      return true;
     } catch {
-      toast("Couldn't save the team", "error");
+      pending.current = pending.current ?? next;
+      setSaveState("failed");
+      toast("Couldn't save the team — press Save to try again", "error");
+      return false;
     }
   }, []);
   const update = (next: Team, now = false) => {
@@ -131,6 +140,7 @@ export function TeamsPage() {
     setTeams((list) => list?.map((t) => (t.id === next.id ? next : t)) ?? list);
     clearTimeout(saveTimer.current);
     pending.current = next;
+    setSaveState("unsaved");
     saveTimer.current = setTimeout(() => save(next), now ? 0 : 500);
   };
   const flushSave = async () => {
@@ -138,6 +148,17 @@ export function TeamsPage() {
     clearTimeout(saveTimer.current);
     await save(pending.current);
   };
+  const saveNow = async () => {
+    clearTimeout(saveTimer.current);
+    if (team && await save(pending.current ?? team)) toast(`Saved ${team.name}`);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveNow(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   useEffect(() => () => { if (pending.current) teamsApi.save(pending.current).catch(() => {}); }, []);
 
   useEffect(() => {
@@ -311,6 +332,13 @@ export function TeamsPage() {
             you talk to {lead?.name}</span>
         </div>
         <div className="grow" />
+        <span className={`tp-save ${saveState}`} role="status" aria-live="polite">
+          {saveState === "saved" ? <><Check /> Saved</>
+            : saveState === "saving" ? <><span className="spinner" /> Saving…</>
+            : saveState === "failed" ? <>Not saved</> : <>Unsaved changes</>}
+        </span>
+        <button className="btn sm" title="Save (⌘S)" onClick={saveNow}
+                disabled={saveState === "saving"}><Save /> Save</button>
         <button className="btn sm" onClick={() => {
           const sel = selected?.kind === "agent" ? selected.id : undefined;
           const p = spotForNew(team, sel);

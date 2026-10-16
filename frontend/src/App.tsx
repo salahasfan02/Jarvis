@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { AGENTS, ChatView, ConfirmModal, ConfirmRequest, ToolChipInfo } from "./components/ChatView";
 import { MatrixRain } from "./components/MatrixRain";
+import { GlyphField } from "./components/GlyphField";
 import { WorldMap } from "./components/WorldMap";
 import { Page, Sidebar } from "./components/Sidebar";
 import { CommandPalette } from "./components/CommandPalette";
@@ -562,7 +563,7 @@ export default function App() {
   const bgKind: string = settings?.ui?.background ?? "";
   const bgPicture = bgKind.startsWith("image:")
     ? `${API}/backgrounds/file/${encodeURIComponent(bgKind.slice(6))}` : "";
-  const animatedBg = bgKind === "matrix" || bgKind === "world" || !!bgPicture;
+  const animatedBg = bgKind === "matrix" || bgKind === "world" || bgKind === "glyphs" || !!bgPicture;
 
   const patchSettings = (patch: any) => {
     setSettings((s: any) => {
@@ -651,6 +652,7 @@ export default function App() {
     <>
     {bgKind === "matrix" && <MatrixRain />}
     {bgKind === "world" && <WorldMap />}
+    {bgKind === "glyphs" && <GlyphField />}
     {bgPicture && (
       <div className="bg-picture" style={{ backgroundImage: `url("${bgPicture}")` }}>
         <div className="bg-picture-dim" style={{ opacity: settings?.ui?.background_dim ?? 0.45 }} />
